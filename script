@@ -1,0 +1,6 @@
+
+##### MDT Simulator 시작
+cd /mnt/d/Dropbox/Temp/fa3st-repository/simulator
+java -jar /mnt/c/development/mdt/mdt.simulator/build/libs/mdt.simulator-0.0.1-all.jar
+
+mdt property get http://www.lg.co.kr/refrigerator/Innercase/Simulation/ProcessOptimization SimulationInfo --repeat 1s

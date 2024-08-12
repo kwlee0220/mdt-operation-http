@@ -1,0 +1,25 @@
+spring:
+   application:
+      name: mdt.simulator
+   servlet:
+      multipart:
+         maxFileSize: 200MB
+         maxRequestSize: 200MB
+      
+server:
+   port: 12987
+   error:
+      include-message: always
+
+logging:
+   level:
+      root: INFO
+   pattern:
+      console: "%d{yyyy-MM-dd HH:mm:ss} | %-5level | %-40.40logger{39} | %msg%n"
+
+mdt-server:
+   endpoint: http://localhost:12985/instance-manager
+ 
+operation-server:
+   endpoint: http://localhost:12987
+   operations: operations.json

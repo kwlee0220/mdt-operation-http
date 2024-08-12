@@ -1,0 +1,25 @@
+{
+	"skku-simulator": {
+		"id": "process-optimization",
+		"submodelId": "https://example.com/ids/내함_성형/sm/Simulation/ProcessOptimization",
+		"workingDirectory": "C:\\Temp\\mdt\\simulator\\workspace",
+		"command": [ "C:/Users/kwlee/AppData/Local/Programs/Microsoft VS Code/Code" ],
+		"timeout": "PT5M",
+		"sessionRetainTimeout": "PT30S"
+	},
+	
+	"program": {
+		"id": "test-operation",
+		"command": [ "C:/Users/kwlee/AppData/Local/Programs/Microsoft VS Code/Code" ],
+		"workingDirectory": "C:\\Temp\\mdt\\simulator\\workspace",
+		"runAsync": true,
+		"portParameters": {
+			"inputs": ["CycleTime1", "CycleTime2", "CycleTime3", "CycleTime4"],
+			"outputs": ["TotalThroughput"],
+			"inoutputs": []
+		},
+		"optionParameters": [ ],
+		"timeout": "PT5M",
+		"sessionRetainTimeout": "PT30S"
+	}
+}
