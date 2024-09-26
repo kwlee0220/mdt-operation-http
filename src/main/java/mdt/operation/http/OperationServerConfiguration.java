@@ -13,4 +13,5 @@ import lombok.Data;
 public class OperationServerConfiguration {
 	private String endpoint;
 	private File operations;
+	private File homeDir;
 }

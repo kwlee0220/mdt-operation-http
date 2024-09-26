@@ -1,7 +1,9 @@
 package mdt.operation.http;
 
+import java.io.File;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -30,21 +32,21 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.google.common.collect.Maps;
 
 import utils.InternalException;
+import utils.KeyValue;
+import utils.Utilities;
 import utils.async.Execution;
 import utils.async.Guard;
 import utils.async.StartableExecution;
 import utils.async.op.AsyncExecutions;
-import utils.func.KeyValue;
+import utils.func.FOption;
 import utils.stream.FStream;
 
-import mdt.client.instance.HttpMDTInstanceManagerClient;
 import mdt.client.operation.HttpOperationClient;
 import mdt.client.operation.OperationResponse;
 import mdt.client.operation.OperationStatus;
 import mdt.client.operation.ProcessBasedMDTOperation;
 import mdt.client.operation.ProcessBasedMDTOperation.Builder;
 import mdt.operation.http.program.ProgramOperationConfiguration;
-import mdt.operation.http.skku.SKKUSimulatorConfiguration;
 
 
 /**
@@ -52,12 +54,12 @@ import mdt.operation.http.skku.SKKUSimulatorConfiguration;
  * @author Kang-Woo Lee (ETRI)
  */
 @RestController
-@RequestMapping("")
+@RequestMapping("operations")
 public class MDTOperationServerController implements InitializingBean {
 	private static final Logger s_logger = LoggerFactory.getLogger(MDTOperationServerController.class);
 	private static final JsonMapper MAPPER = new JsonMapper();
 	
-	@Autowired private HttpMDTInstanceManagerClient m_manager;
+//	@Autowired private HttpMDTInstanceManagerClient m_manager;
 	@Autowired private OperationServerConfiguration m_config;
 	private final Map<String,Object> m_opConfigs = Maps.newHashMap();
 
@@ -66,23 +68,36 @@ public class MDTOperationServerController implements InitializingBean {
 	
 	@Override
 	public void afterPropertiesSet() throws Exception {
+		if ( s_logger.isInfoEnabled() ) {
+			s_logger.info("loading operations from {}", m_config.getOperations().getAbsolutePath());
+		}
+		
+		File homeDir = FOption.getOrElse(m_config.getHomeDir(), () -> m_config.getOperations()
+																				.getAbsoluteFile()
+																				.getParentFile());
+		
 		JsonNode serverDescs = MAPPER.readTree(m_config.getOperations());
 		for ( Map.Entry<String,JsonNode> ent: serverDescs.properties() ) {
-			if ( s_logger.isInfoEnabled() ) {
-				s_logger.info("loading operation: {} (id={})", ent.getValue().at("/id").asText(),  ent.getKey());
-			}
-			
-			switch ( ent.getKey() ) {
-				case "skku-simulator":
-					SKKUSimulatorConfiguration skConf = MAPPER.readValue(ent.getValue().traverse(),
-																		SKKUSimulatorConfiguration.class);
-					m_opConfigs.put(skConf.getId(), skConf);
-					break;
-				case "program":
-					ProgramOperationConfiguration poConf = MAPPER.readValue(ent.getValue().traverse(),
-																		ProgramOperationConfiguration.class);
+			if ( ent.getKey().equals("program") ) {
+				Iterator<JsonNode> opConfNodeIter = ent.getValue().iterator();
+				while ( opConfNodeIter.hasNext() ) {
+					String confStr = MAPPER.writeValueAsString(opConfNodeIter.next());
+					ProgramOperationConfiguration poConf = MAPPER.readValue(confStr, ProgramOperationConfiguration.class);
+					
+					File opHome = new File(homeDir, poConf.getId());
+					Map<String,String> vars = Maps.newHashMap(System.getenv());
+					vars.put("MDT_OPERATION_SERVER_HOME", homeDir.getAbsolutePath());
+					vars.put("MDT_OPERATION_HOME", opHome.getAbsolutePath());
+					confStr = Utilities.substributeString(confStr, vars);
+					poConf = MAPPER.readValue(confStr, ProgramOperationConfiguration.class);
+					
+					if ( s_logger.isInfoEnabled() ) {
+						s_logger.info("\tloading program operation: id={}, dir={}",
+										poConf.getId(), opHome);
+					}
 					m_opConfigs.put(poConf.getId(), poConf);
-					break;
+				}	
+				break;
 			}
 		}
 	}
@@ -90,11 +105,30 @@ public class MDTOperationServerController implements InitializingBean {
     @PostMapping("/{opId}")
     public ResponseEntity<OperationResponse<JsonNode>> run(@PathVariable("opId") String opId,
     														@RequestBody String parametersJson) {
+    	if ( s_logger.isDebugEnabled() ) {
+    		s_logger.debug("Trying to start an operation: {}", opId);
+    	}
+    	
     	ProgramOperationConfiguration conf = (ProgramOperationConfiguration)m_opConfigs.get(opId);
+    	if ( conf == null ) {
+    		String msg = String.format("Unknown operation: id=%s", opId);
+			return ResponseEntity.internalServerError()
+									.body(OperationResponse.<JsonNode>failed(msg));
+    	}
+    	if ( s_logger.isInfoEnabled() ) {
+    		String inputs = FStream.from(conf.getPortParameters().getInputs()).join(',');
+    		String outputs = FStream.from(conf.getPortParameters().getOutputs()).join(',');
+    		String workingDirStr = FOption.mapOrElse(conf.getWorkingDirectory(),
+    												f -> String.format(", working-dir=%s", f), "");
+    		
+    		s_logger.info("Starting an operation: id={}, command={}{}, inputs={{}}, outputs={{}}",
+    						opId, conf.getCommand(), workingDirStr, inputs, outputs);
+    	}
     	
     	Builder builder = ProcessBasedMDTOperation.builder()
 													.setCommand(conf.getCommand())
 													.setWorkingDirectory(conf.getWorkingDirectory())
+													.addPortFileToCommandLine(conf.isAddPortFileToCommandLine())
 													.setTimeout(conf.getTimeout());
 
     	Map<String,String> parameters = HttpOperationClient.parseParametersJson(parametersJson);
@@ -115,15 +149,10 @@ public class MDTOperationServerController implements InitializingBean {
     			.filter(kv -> kv.value() != null)
     			.fold(builder, (b, param) -> b.addFileArgument(param.key(), param.value(), true));
     	
-    	FStream.from(conf.getPortParameters().getInoutputs())
-				.map(name -> KeyValue.of(name, parameters.get(name)))
-    			.filter(kv -> kv.value() != null)
-    			.fold(builder, (b, param) -> b.addFileArgument(param.key(), param.value(), true));
-    	
     	ProcessBasedMDTOperation op = m_guard.getOrThrow(() -> {
-    		if ( m_op != null ) {
-    			throw new IllegalStateException();
-    		}
+//    		if ( m_op != null ) {
+//    			throw new IllegalStateException();
+//    		}
     		return m_op = builder.build();
     	});
     	
@@ -152,7 +181,7 @@ public class MDTOperationServerController implements InitializingBean {
 		    	}
 				
 				StartableExecution<Void> delayedSessionClose
-		    			= AsyncExecutions.delayed(() -> unsetOperation(), conf.getSessionRetainTimeout());
+		    			= AsyncExecutions.delayed(this::unsetOperation, conf.getSessionRetainTimeout());
 				delayedSessionClose.start();
 			});
 		});
@@ -269,6 +298,9 @@ public class MDTOperationServerController implements InitializingBean {
     private void unsetOperation() {
 		m_guard.run(() -> {
 			if ( m_op != null ) {
+				if ( s_logger.isDebugEnabled() ) {
+					s_logger.debug("purge the finished operation: {}", m_op);
+				}
 				m_op = null;
 			}
 		});

@@ -24,11 +24,11 @@ import mdt.operation.SimulationRequest;
  */
 public class SubprocessSimulator implements MDTSimulator {
 	private final File m_workingDirectory;
-	private final List<String> m_commandPrefix;
+	private final List<String> m_command;
 	private final AtomicReference<Process> m_proc = new AtomicReference<>();
 	
-	public SubprocessSimulator(File workingDir, List<String> commandPrefix) {
-		m_commandPrefix = commandPrefix;
+	public SubprocessSimulator(File workingDir, List<String> command) {
+		m_command = command;
 		m_workingDirectory = workingDir;
 		if ( m_workingDirectory != null ) {
 			m_workingDirectory.mkdirs();
@@ -38,7 +38,7 @@ public class SubprocessSimulator implements MDTSimulator {
 	@Override
 	public List<String> run(SimulationRequest request) throws IOException, InterruptedException,
 																TimeoutException, Exception {
-		List<String> commandLine = Lists.newArrayList(m_commandPrefix);
+		List<String> commandLine = Lists.newArrayList(m_command);
 		
 		Map<String,String> inputs = request.getInputValues();
 		for ( String inputId: inputs.keySet() ) {

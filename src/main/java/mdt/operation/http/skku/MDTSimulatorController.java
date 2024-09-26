@@ -1,4 +1,4 @@
-package mdt.operation.http.junk;
+package mdt.operation.http.skku;
 
 import static mdt.model.SubmodelUtils.cast;
 import static mdt.model.SubmodelUtils.traverse;
@@ -26,7 +26,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -57,9 +56,9 @@ import mdt.client.operation.OperationStatusResponse;
 import mdt.client.resource.ExtendedSubmodelService;
 import mdt.client.resource.HttpSubmodelServiceClient;
 import mdt.ksx9101.simulation.Simulation;
+import mdt.model.ResourceNotFoundException;
 import mdt.model.SubmodelUtils;
 import mdt.model.instance.MDTInstance;
-import mdt.model.registry.ResourceNotFoundException;
 import mdt.model.service.SubmodelService;
 import mdt.operation.MDTSimulator;
 import mdt.operation.SimulationRequest;
@@ -73,7 +72,7 @@ import mdt.operation.subprocess.SubprocessSimulator;
  * @author Kang-Woo Lee (ETRI)
  */
 //@RestController
-//@RequestMapping("/simulator")
+//@RequestMapping("/skku")
 public class MDTSimulatorController implements InitializingBean {
 	private static final Logger s_logger = LoggerFactory.getLogger(MDTSimulatorController.class);
 	private static final Duration SESSION_RETAIN_TIMEOUT = Duration.ofMinutes(5);	// 5 minutes
@@ -81,10 +80,7 @@ public class MDTSimulatorController implements InitializingBean {
 	private static final JsonSerializer s_ser = new JsonSerializer();
 	
 	@Autowired private HttpMDTInstanceManagerClient m_mdtClient;
-	@Autowired private MDTSimulatorConfiguration m_config;
-	
-	@Value("${simulation-endpoint}")
-	private String m_simulationEndpoint;
+	@Autowired private SKKUSimulatorConfiguration m_config;
 	
 	private MDTSimulator m_simulator;
 	private Map<String,SimulationSession> m_sessions = Maps.newHashMap();
@@ -95,47 +91,40 @@ public class MDTSimulatorController implements InitializingBean {
 			s_logger.info("Shutting down MDT Simulator...");
 		}
 		
-//		m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_ENDPOINT, "");
-//		m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_TIMEOUT, "");
-//		m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_SESSION_TIMEOUT, "");
-//		m_xsvc = null;
+//		if ( m_config.getSimulatorEndpoint() != null ) {
+//			m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_ENDPOINT, "");
+//			m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_TIMEOUT, "");
+//			m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_SESSION_TIMEOUT, "");
+//			m_xsvc = null;
+//		}
 	}
 
 	@Override
 	public void afterPropertiesSet() throws Exception {
-		Preconditions.checkState(m_config.getSubmodelId() != null, "Simulation Submodel is missing");
+		Preconditions.checkState(m_config.getSimulationSubmodelRefString() != null,
+								"Simulation Submodel is missing");
 		
-//		SubmodelService svc;
-//		if ( m_simulationEndpoint.trim().length() > 0 ) {
-//			svc = HttpSubmodelServiceClient.newTrustAllSubmodelServiceClient(m_simulationEndpoint);
-//		}
-//		else {
-//			MDTInstance inst = m_mdtClient.getInstanceBySubmodelId(m_config.getSubmodelId());
-//			svc = inst.getSubmodelServiceById(m_config.getSubmodelId());
-//		}
-//		m_xsvc = ExtendedSubmodelService.from(svc);
-//		
-//		m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_ENDPOINT, m_config.getEndpoint());
-//		if ( m_config.getTimeout() != null ) {
-//			m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_TIMEOUT,
-//											m_config.getTimeout().toString());
-//		}
-//		if ( m_config.getSessionRetainTimeout() != null ) {
-//			m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_SESSION_TIMEOUT,
-//											m_config.getSessionRetainTimeout().toString());
+//		SubmodelService simulationSvc = SubmodelReference.parseString(m_mdtClient,
+//																m_config.getSimulationSubmodelRefString())
+//														.get();
+//		m_xsvc = ExtendedSubmodelService.from(simulationSvc);
+
+//		if ( m_config.getSimulatorEndpoint() != null ) {
+//			m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_ENDPOINT, m_config.getSimulatorEndpoint());
+//			if ( m_config.getTimeout() != null ) {
+//				m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_TIMEOUT,
+//												m_config.getTimeout().toString());
+//			}
+//			if ( m_config.getSessionRetainTimeout() != null ) {
+//				m_xsvc.setPropertyValueByPath(Simulation.IDSHORT_PATH_SESSION_TIMEOUT,
+//												m_config.getSessionRetainTimeout().toString());
+//			}
 //		}
 		Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
 		
-//		Duration timeout = SubmodelUtils.getPropertyValueByPath(svc.getSubmodel(),
-//																Simulation.IDSHORT_PATH_TIMEOUT,
-//																Duration.class);
-//		Duration sessionRetainTimeout = SubmodelUtils.getPropertyValueByPath(svc.getSubmodel(),
-//																	Simulation.IDSHORT_PATH_SESSION_TIMEOUT,
-//																	Duration.class);
-		
 		if ( s_logger.isInfoEnabled() ) {
-			s_logger.info("Simulator Endpoint {}", m_config.getEndpoint());
-			s_logger.info("Simulation Submodel: id={}", m_config.getSubmodelId());
+			s_logger.info("Simulator Endpoint {}", m_config.getSimulatorEndpoint());
+			s_logger.info("Simulation Submodel: ref={}", m_config.getSimulationSubmodelRefString());
 			
 			File workDir = m_config.getWorkingDirectory();
 			if ( workDir == null ) {
@@ -147,7 +136,7 @@ public class MDTSimulatorController implements InitializingBean {
 			s_logger.info("Simulation SessionRetainTimeout: {}", m_config.getSessionRetainTimeout());
 		}
 		
-		m_simulator = new SubprocessSimulator(m_config.getWorkingDirectory(), m_config.getCommandPrefix());
+		m_simulator = new SubprocessSimulator(m_config.getWorkingDirectory(), m_config.getCommand());
 	}
 
     @PostMapping({""})
@@ -165,8 +154,7 @@ public class MDTSimulatorController implements InitializingBean {
 			}
 			catch ( ResourceNotFoundException e ) {}
 
-//    		String sessionId = Integer.toHexString(sim.hashCode());
-    		String sessionId = "ProcessOptimization";
+    		String sessionId = "";
     		SimulationSession session = SimulationSession.builder()
     													.sessionId(sessionId)
     													.simulation(sim)

@@ -17,9 +17,18 @@ logging:
    pattern:
       console: "%d{yyyy-MM-dd HH:mm:ss} | %-5level | %-40.40logger{39} | %msg%n"
 
-mdt-server:
-   endpoint: http://localhost:12985/instance-manager
+mdt-manager:
+   endpoint: http://localhost:12985
+
+skku:
+   simulatorEndpoint: http://localhost:12987/skku
+   simulationSubmodelRefString: 내함_성형/Simulation
+   workingDirectory: C:\\Temp\\mdt\\simulator\\workspace
+   command: [ "C:/Users/kwlee/AppData/Local/Programs/Microsoft VS Code/Code" ]
+   timeout: PT5M
+   sessionRetainTimeout: PT30S
  
 operation-server:
    endpoint: http://localhost:12987
    operations: operations.json
+   homeDir: ${MDT_HOME}/operation-server

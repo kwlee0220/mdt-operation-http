@@ -1,16 +1,88 @@
 plugins {
+	id 'java'
+	id 'application'
+	id 'eclipse'
 	id 'org.springframework.boot' version '3.2.4'
 	id 'io.spring.dependency-management' version '1.1.4'
 }
 
+group = 'etri'
+version = '0.9.1'
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+}
+	
+[compileJava,compileTestJava]*.options*.encoding = 'UTF-8'
+tasks.withType(JavaCompile) {
+	options.encoding = 'UTF-8'
+}
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+repositories {
+	mavenCentral()
+}
 dependencies {
 	implementation project(":utils")
 	implementation project(":mdt-client")
+
+	// Guava (from the project :utils)
+	implementation "com.google.guava:guava:${guava_version}"
+
+	// Lombok (from the project :utils)
+	compileOnly "org.projectlombok:lombok:${lombok_version}"
+	annotationProcessor "org.projectlombok:lombok:${lombok_version}"
+	
+	// AAS model
+	implementation "org.eclipse.digitaltwin.aas4j:aas4j-dataformat-json:${aas4j_version}"
 
 	// Spring boot
 	implementation "org.springframework.boot:spring-boot-starter-web:${spring_boot_version}"
 }
 
 bootJar {
-	mainClass = 'mdt.operation.http.MDTSimulatorController'
+	mainClass = 'mdt.operation.http.MDTHttpOperationServerApplication'
+}
+
+eclipse {
+	classpath {
+		file {
+			withXml {
+				def node = it.asNode()
+				node.appendNode('classpathentry', [kind: 'output', path: 'build/classes'])
+			}
+			
+			whenMerged { cp ->
+				Map entryByPath = cp.entries.groupBy { entry -> entry.path }
+				entryByPath.each { key, values ->
+					if ( values.size() > 1 ) {
+						def entry = values.first()
+						if ( entry.kind == 'src' ) {
+							entry.includes = []
+							entry.excludes = []
+						}
+						int index = cp.entries.indexOf entry
+						cp.entries.removeAll values
+						cp.entries.add index, entry
+					}
+				}
+				cp.entries.each { entry ->
+					if ( entry.kind == 'src' && entry.hasProperty('output') ) {
+						if ( entry.path.contains('/test/') ) {
+							entry.output = 'build/test_classes'
+						}
+						else {
+							entry.output = 'build/classes'
+						}
+					}
+				}
+			}
+		}
+	}
 }

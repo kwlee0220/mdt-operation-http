@@ -1,25 +1,55 @@
 {
-	"skku-simulator": {
-		"id": "process-optimization",
-		"submodelId": "https://example.com/ids/내함_성형/sm/Simulation/ProcessOptimization",
-		"workingDirectory": "C:\\Temp\\mdt\\simulator\\workspace",
-		"command": [ "C:/Users/kwlee/AppData/Local/Programs/Microsoft VS Code/Code" ],
-		"timeout": "PT5M",
-		"sessionRetainTimeout": "PT30S"
-	},
+	"skku-simulator": [
+		{
+			"id": "process-optimization",
+			"submodelId": "https://example.com/ids/내함_성형/sm/Simulation/ProcessOptimization",
+			"workingDirectory": "C:\\Temp\\mdt\\simulator\\workspace",
+			"command": [ "C:/Users/kwlee/AppData/Local/Programs/Microsoft VS Code/Code" ],
+			"timeout": "PT5M",
+			"sessionRetainTimeout": "PT30S"
+		}
+	],
 	
-	"program": {
-		"id": "test-operation",
-		"command": [ "C:/Users/kwlee/AppData/Local/Programs/Microsoft VS Code/Code" ],
-		"workingDirectory": "C:\\Temp\\mdt\\simulator\\workspace",
-		"runAsync": true,
-		"portParameters": {
-			"inputs": ["CycleTime1", "CycleTime2", "CycleTime3", "CycleTime4"],
-			"outputs": ["TotalThroughput"],
-			"inoutputs": []
+	"program": [
+		{
+			"id": "samcheon",
+			"command": ["${MDT_OPERATION_HOME}/program/run_simulation.sh"],
+			"workingDirectory": "${MDT_OPERATION_HOME}/program",
+			"runAsync": true,
+			"portParameters": {
+				"inputs": ["AvgDefectRate", "DefectVolume", "AvgProcessingTime", "QuantityProduced", "AvgWaitingTime"],
+				"outputs": ["TotalQuantityPrediction"]
+			},
+			"optionParameters": [ ],
+			"timeout": "PT1M",
+			"sessionRetainTimeout": "PT5S"
 		},
-		"optionParameters": [ ],
-		"timeout": "PT5M",
-		"sessionRetainTimeout": "PT30S"
-	}
+		{
+			"id": "cnc",
+			"command": ["${MDT_OPERATION_HOME}/run.bat"],
+			"workingDirectory": "${MDT_OPERATION_HOME}",
+			"runAsync": true,
+			"addPortFileToCommandLine": false,
+			"portParameters": {
+				"inputs": ["ProductionQuantityOrder"],
+				"outputs": ["CuttingSpeed", "CuttingDepth", "FeedingSpeed"]
+			},
+			"optionParameters": [ ],
+			"timeout": "PT1M",
+			"sessionRetainTimeout": "PT5S"
+		},
+		{
+			"id": "gedit",
+			"command": [ "/usr/bin/gedit" ],
+			"workingDirectory": "${MDT_HOME}/operation-server/cnc",
+			"runAsync": true,
+			"portParameters": {
+				"inputs": ["ProductionQuantityOrder"],
+				"outputs": ["CuttingSpeed", "CuttingDepth", "FeedingSpeed"]
+			},
+			"optionParameters": [ ],
+			"timeout": "PT1M",
+			"sessionRetainTimeout": "PT5S"
+		}
+	]
 }

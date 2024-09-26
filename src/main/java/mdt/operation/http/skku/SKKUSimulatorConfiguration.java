@@ -16,8 +16,8 @@ import lombok.Setter;
  */
 @Getter @Setter
 public class SKKUSimulatorConfiguration {
-	private String id;
-	private String submodelId;
+	@Nullable private String simulatorEndpoint;
+	private String simulationSubmodelRefString;
 	private File workingDirectory;
 	private List<String> command;
 	@Nullable private Duration timeout;
