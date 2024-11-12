@@ -1,7 +1,7 @@
 package mdt.operation.http.skku;
 
-import static mdt.model.SubmodelUtils.cast;
-import static mdt.model.SubmodelUtils.traverse;
+import static mdt.model.sm.SubmodelUtils.cast;
+import static mdt.model.sm.SubmodelUtils.traverse;
 
 import java.io.File;
 import java.net.URI;
@@ -50,16 +50,17 @@ import utils.async.op.AsyncExecutions;
 import utils.func.Funcs;
 import utils.io.FileUtils;
 
+import mdt.client.HttpMDTManagerClient;
 import mdt.client.instance.HttpMDTInstanceManagerClient;
 import mdt.client.operation.OperationStatus;
 import mdt.client.operation.OperationStatusResponse;
 import mdt.client.resource.ExtendedSubmodelService;
 import mdt.client.resource.HttpSubmodelServiceClient;
-import mdt.ksx9101.simulation.Simulation;
 import mdt.model.ResourceNotFoundException;
-import mdt.model.SubmodelUtils;
-import mdt.model.instance.MDTInstance;
+import mdt.model.service.MDTInstance;
 import mdt.model.service.SubmodelService;
+import mdt.model.sm.SubmodelUtils;
+import mdt.model.sm.simulation.Simulation;
 import mdt.operation.MDTSimulator;
 import mdt.operation.SimulationRequest;
 import mdt.operation.SimulationSession;
@@ -71,15 +72,16 @@ import mdt.operation.subprocess.SubprocessSimulator;
  *
  * @author Kang-Woo Lee (ETRI)
  */
-//@RestController
-//@RequestMapping("/skku")
+@RestController
+@RequestMapping("/skku")
 public class MDTSimulatorController implements InitializingBean {
 	private static final Logger s_logger = LoggerFactory.getLogger(MDTSimulatorController.class);
 	private static final Duration SESSION_RETAIN_TIMEOUT = Duration.ofMinutes(5);	// 5 minutes
 	private static final JsonMapper s_deser = new JsonMapper();
 	private static final JsonSerializer s_ser = new JsonSerializer();
-	
-	@Autowired private HttpMDTInstanceManagerClient m_mdtClient;
+
+	@Autowired private HttpMDTManagerClient m_mdt;
+	private HttpMDTInstanceManagerClient m_manager;
 	@Autowired private SKKUSimulatorConfiguration m_config;
 	
 	private MDTSimulator m_simulator;
@@ -104,6 +106,8 @@ public class MDTSimulatorController implements InitializingBean {
 		Preconditions.checkState(m_config.getSimulationSubmodelRefString() != null,
 								"Simulation Submodel is missing");
 		
+		m_manager = m_mdt.getInstanceManager();
+		
 //		SubmodelService simulationSvc = SubmodelReference.parseString(m_mdtClient,
 //																m_config.getSimulationSubmodelRefString())
 //														.get();
@@ -120,7 +124,6 @@ public class MDTSimulatorController implements InitializingBean {
 //												m_config.getSessionRetainTimeout().toString());
 //			}
 //		}
-		Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
 		
 		if ( s_logger.isInfoEnabled() ) {
 			s_logger.info("Simulator Endpoint {}", m_config.getSimulatorEndpoint());
@@ -128,7 +131,7 @@ public class MDTSimulatorController implements InitializingBean {
 			
 			File workDir = m_config.getWorkingDirectory();
 			if ( workDir == null ) {
-				workDir = FileUtils.getWorkingDirectory();
+				workDir = FileUtils.getCurrentWorkingDirectory();
 			}
 			s_logger.info("Simulation working directory: {}", workDir);
 			
@@ -166,6 +169,9 @@ public class MDTSimulatorController implements InitializingBean {
     				// 시뮬레이션이 성공한 경우.
     				// 수행 결과 인자를 변경시킨다.
         			updateOutputProperties(simulationService, outputs);
+    			});
+    			result.ifFailed(error -> {
+    				s_logger.error("Failed to run Simulation, cause=" + error);
     			});
     			
     			StartableExecution<SimulationSession> delayedSessionClose
@@ -235,7 +241,7 @@ public class MDTSimulatorController implements InitializingBean {
 				Entry<String,JsonNode> first = Funcs.getFirstOrNull(elements);
 				if ( first.getKey().equals("submodelId") ) {
 					String submodelId = first.getValue().asText();
-					MDTInstance inst = m_mdtClient.getInstanceBySubmodelId(submodelId);
+					MDTInstance inst = m_manager.getInstanceBySubmodelId(submodelId);
 					return inst.getSubmodelServiceById(submodelId);
 				}
 				else if ( first.getKey().equals("submodelEndpoint") ) {
@@ -310,7 +316,7 @@ public class MDTSimulatorController implements InitializingBean {
 			return prop.getValue();
 		}
 		else if ( sme instanceof ReferenceElement re ) {
-			SubmodelElement sme2 = m_mdtClient.getSubmodelElementByReference(re.getValue());
+			SubmodelElement sme2 = m_manager.getSubmodelElementByReference(re.getValue());
 			return derefSubmodelElementString(sme2);
 		}
 		else {

@@ -1,7 +1,7 @@
 package mdt.operation.http.skku;
 
-import static mdt.model.SubmodelUtils.cast;
-import static mdt.model.SubmodelUtils.traverse;
+import static mdt.model.sm.SubmodelUtils.cast;
+import static mdt.model.sm.SubmodelUtils.traverse;
 
 import java.net.URI;
 import java.time.Duration;
@@ -52,11 +52,11 @@ import mdt.client.operation.OperationStatus;
 import mdt.client.operation.OperationStatusResponse;
 import mdt.client.resource.ExtendedSubmodelService;
 import mdt.client.resource.HttpSubmodelServiceClient;
-import mdt.ksx9101.simulation.Simulation;
 import mdt.model.ResourceNotFoundException;
-import mdt.model.SubmodelUtils;
-import mdt.model.instance.MDTInstance;
+import mdt.model.service.MDTInstance;
 import mdt.model.service.SubmodelService;
+import mdt.model.sm.SubmodelUtils;
+import mdt.model.sm.simulation.Simulation;
 import mdt.operation.MDTSimulator;
 import mdt.operation.SimulationRequest;
 import mdt.operation.SimulationSession;

@@ -30,5 +30,5 @@ skku:
  
 operation-server:
    endpoint: http://localhost:12987
-   operations: operations.json
+   operations: ${MDT_HOME}/operation-server/operations.json
    homeDir: ${MDT_HOME}/operation-server

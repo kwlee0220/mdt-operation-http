@@ -10,18 +10,34 @@
 		}
 	],
 	
-	"program": [
+	"programs": [
+		{
+			"id": "test",
+			"command": [ "python3", "${MDT_OPERATION_HOME}/program/print_all_arguments.py",
+						"--sleep", "${QuantityProduced}", "--arg1_value", "${AvgDefectRate:value}",
+						"--arg2_file", "${DefectVolume:path}", "--output", "${TotalQuantityPrediction:path}" ],
+			"workingDirectory": "${MDT_OPERATION_HOME}",
+			"runAsync": true,
+			"portParameters": {
+				"inputs": ["AvgDefectRate", "DefectVolume", "AvgProcessingTime", "QuantityProduced", "AvgWaitingTime"],
+				"outputs": ["TotalQuantityPrediction"]
+			},
+			"timeout": "PT1M",
+			"sessionRetainTimeout": "30s"
+		},
 		{
 			"id": "samcheon",
-			"command": ["${MDT_OPERATION_HOME}/program/run_simulation.sh"],
+			"command": [ "python3", "${MDT_OPERATION_HOME}/program/print_all_arguments.py",
+						"AvgDefectRate", "${DefectVolume:path}", "${AvgProcessingTime:path}",
+						"${QuantityProduced:name}", "AvgWaitingTime",
+						"TotalQuantityPrediction" ],
 			"workingDirectory": "${MDT_OPERATION_HOME}/program",
 			"runAsync": true,
 			"portParameters": {
 				"inputs": ["AvgDefectRate", "DefectVolume", "AvgProcessingTime", "QuantityProduced", "AvgWaitingTime"],
 				"outputs": ["TotalQuantityPrediction"]
 			},
-			"optionParameters": [ ],
-			"timeout": "PT1M",
+			"timeout": "PT10M",
 			"sessionRetainTimeout": "PT5S"
 		},
 		{
@@ -29,25 +45,10 @@
 			"command": ["${MDT_OPERATION_HOME}/run.bat"],
 			"workingDirectory": "${MDT_OPERATION_HOME}",
 			"runAsync": true,
-			"addPortFileToCommandLine": false,
 			"portParameters": {
 				"inputs": ["ProductionQuantityOrder"],
 				"outputs": ["CuttingSpeed", "CuttingDepth", "FeedingSpeed"]
 			},
-			"optionParameters": [ ],
-			"timeout": "PT1M",
-			"sessionRetainTimeout": "PT5S"
-		},
-		{
-			"id": "gedit",
-			"command": [ "/usr/bin/gedit" ],
-			"workingDirectory": "${MDT_HOME}/operation-server/cnc",
-			"runAsync": true,
-			"portParameters": {
-				"inputs": ["ProductionQuantityOrder"],
-				"outputs": ["CuttingSpeed", "CuttingDepth", "FeedingSpeed"]
-			},
-			"optionParameters": [ ],
 			"timeout": "PT1M",
 			"sessionRetainTimeout": "PT5S"
 		}
