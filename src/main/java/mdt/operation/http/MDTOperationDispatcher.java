@@ -111,7 +111,13 @@ public class MDTOperationDispatcher implements InitializingBean {
     	OperationSession opSession = result.left().get();
     	ProgramOperationDescriptor opDesc = opSession.m_task.getOperationDescriptor();
 		try {
-			opSession.m_task.get(opDesc.getTimeout().toMillis(), TimeUnit.MILLISECONDS);
+			Duration timeout = opDesc.getTimeout();
+			if ( timeout != null ) {
+				opSession.m_task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+			}
+			else {
+				opSession.m_task.get();
+			}
     		return buildResponse(opSession);
 		}
 		finally {
@@ -242,6 +248,8 @@ public class MDTOperationDispatcher implements InitializingBean {
     		ProgramTask task = new ProgramTask(opDesc);
     		task.setMDTInstanceManager(m_manager);
     		
+    		// OperationRequestBody의 파라미터들을 outputNames에 포함 여부에 따라
+    		// input parameter와 output parameter로 분리하고, 각각을 Task에 추가한다.
     		Tuple<List<Parameter>,List<Parameter>> parts
     				= Funcs.partition(reqBody.getParameters(), p -> reqBody.getOutputNames().contains(p.getName()));
     		parts._2.forEach(task::addOrReplaceInputParameter);
