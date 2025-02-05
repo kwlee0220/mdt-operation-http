@@ -177,7 +177,7 @@ public class MDTOperationDispatcher implements InitializingBean {
     		
     		if ( session.m_task.isFinished() ) {
     			removeOperationSessionInGuard(sessionId);
-        		m_guard.signalAll();
+        		m_guard.signalAllInGuard();
     		}
     		
     		return buildResponse(session);
@@ -288,7 +288,7 @@ public class MDTOperationDispatcher implements InitializingBean {
     			}
     		});
     		
-    		m_guard.signalAll();
+    		m_guard.signalAllInGuard();
     	}
     	finally {
     		m_guard.unlock();
