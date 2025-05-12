@@ -4,6 +4,7 @@ import static mdt.model.sm.SubmodelUtils.cast;
 import static mdt.model.sm.SubmodelUtils.traverse;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
@@ -48,8 +49,8 @@ import utils.async.op.AsyncExecutions;
 import utils.func.Funcs;
 import utils.io.FileUtils;
 
-import mdt.client.HttpMDTManagerClient;
-import mdt.client.instance.HttpMDTInstanceManagerClient;
+import mdt.client.HttpMDTManager;
+import mdt.client.instance.HttpMDTInstanceManager;
 import mdt.client.operation.OperationStatus;
 import mdt.client.operation.OperationStatusResponse;
 import mdt.client.resource.ExtendedSubmodelService;
@@ -78,8 +79,8 @@ public class MDTSimulatorController implements InitializingBean {
 	private static final JsonMapper s_deser = new JsonMapper();
 	private static final JsonSerializer s_ser = new JsonSerializer();
 
-	@Autowired private HttpMDTManagerClient m_mdt;
-	private HttpMDTInstanceManagerClient m_manager;
+	@Autowired private HttpMDTManager m_mdt;
+	private HttpMDTInstanceManager m_manager;
 	@Autowired private SKKUSimulatorConfiguration m_config;
 	
 	private MDTSimulator m_simulator;
@@ -255,7 +256,7 @@ public class MDTSimulatorController implements InitializingBean {
 		throw new IllegalArgumentException("Invalid Simulation request: " + parameters);
 	}
 
-    private StartableExecution<List<String>> startSimulation(Submodel submodel) {
+    private StartableExecution<List<String>> startSimulation(Submodel submodel) throws IOException {
 		Preconditions.checkArgument(submodel != null);
 		
 		SubmodelElement info = SubmodelUtils.traverse(submodel, "SimulationInfo");
@@ -284,7 +285,7 @@ public class MDTSimulatorController implements InitializingBean {
 		return simulation;
     }
 
-	private Map<String,String> loadInputs(SubmodelElement simulationInfo) {
+	private Map<String,String> loadInputs(SubmodelElement simulationInfo) throws IOException {
 		Map<String,String> inputValues = Maps.newLinkedHashMap();
 		
 		SubmodelElementList inputs = cast(traverse(simulationInfo, "Inputs"), SubmodelElementList.class);
@@ -309,7 +310,7 @@ public class MDTSimulatorController implements InitializingBean {
 		return outputVariableNames;
 	}
 	
-	private String derefSubmodelElementString(SubmodelElement sme) {
+	private String derefSubmodelElementString(SubmodelElement sme) throws IOException {
 		if ( sme instanceof Property prop ) {
 			return prop.getValue();
 		}
@@ -322,7 +323,7 @@ public class MDTSimulatorController implements InitializingBean {
 				return s_ser.write(sme);
 			}
 			catch ( SerializationException e ) {
-				throw new InternalException("" + e);
+				throw new IOException("" + e);
 			}
 		}
 	}

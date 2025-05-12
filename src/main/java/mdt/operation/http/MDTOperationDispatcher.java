@@ -4,8 +4,8 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -14,6 +14,7 @@ import java.util.concurrent.TimeoutException;
 
 import javax.annotation.concurrent.GuardedBy;
 
+import org.apache.commons.io.FilenameUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
@@ -29,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.fasterxml.jackson.core.JsonParseException;
 import com.google.common.base.Preconditions;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
@@ -36,25 +38,33 @@ import com.google.common.collect.Maps;
 
 import utils.InternalException;
 import utils.Throwables;
+import utils.async.CommandExecution;
+import utils.async.CommandVariable;
+import utils.async.CommandVariable.FileVariable;
 import utils.async.Guard;
 import utils.func.Either;
 import utils.func.FOption;
-import utils.func.Funcs;
-import utils.func.Tuple;
 import utils.http.RESTfulErrorEntity;
 import utils.io.FileUtils;
+import utils.io.IOUtils;
 import utils.stream.FStream;
+import utils.stream.KeyValueFStream;
 
-import mdt.client.operation.OperationRequestBody;
+import mdt.client.operation.OperationRequest;
 import mdt.client.operation.OperationResponse;
-import mdt.model.AASUtils;
 import mdt.model.MDTManager;
 import mdt.model.MDTModelSerDe;
 import mdt.model.ResourceNotFoundException;
 import mdt.model.instance.MDTInstanceManager;
-import mdt.task.Parameter;
-import mdt.task.builtin.ProgramOperationDescriptor;
-import mdt.task.builtin.ProgramTask;
+import mdt.model.sm.AASFile;
+import mdt.model.sm.ref.MDTElementReference;
+import mdt.model.sm.value.ElementValue;
+import mdt.model.sm.value.FileValue;
+import mdt.model.sm.value.PropertyValue;
+import mdt.model.sm.variable.AbstractVariable.ReferenceVariable;
+import mdt.model.sm.variable.Variable;
+import mdt.operation.http.program.ProgramOperationConfiguration;
+import mdt.task.TaskException;
 
 
 /**
@@ -75,10 +85,11 @@ public class MDTOperationDispatcher implements InitializingBean {
 	private final Guard m_guard = Guard.create();
 	@GuardedBy("m_guard") private final Map<String,OperationSession> m_sessions = Maps.newHashMap();
 	@GuardedBy("m_guard") private Cache<String,OperationSession> m_closedSessions
-															= CacheBuilder.newBuilder()
-																			.expireAfterWrite(SESSION_RETAIN_TIMEOUT)
-																			.build();
-	
+														= CacheBuilder.newBuilder()
+//																		.expireAfterAccess(SESSION_RETAIN_TIMEOUT)
+																		.expireAfterWrite(SESSION_RETAIN_TIMEOUT)
+																		.build();
+
 	@Override
 	public void afterPropertiesSet() throws Exception {
 		Preconditions.checkState(m_mdt != null);
@@ -89,81 +100,63 @@ public class MDTOperationDispatcher implements InitializingBean {
 		m_homeDir = FOption.getOrElse(m_config.getHomeDir(), FileUtils::getCurrentWorkingDirectory);
 	}
 
-    @PostMapping("/operations/{opId}/sync")
-    public ResponseEntity<?> runSync(@PathVariable("opId") String encodedOpId,
-    									@RequestBody String reqBodyJson)
-    	throws TimeoutException, CancellationException, InterruptedException, ExecutionException {
-    	String opId = AASUtils.decodeBase64UrlSafe(encodedOpId);
-    	OperationRequestBody reqBody;
-		try {
-			reqBody = OperationRequestBody.parseJsonString(reqBodyJson);
-		}
-		catch ( IOException e ) {
-			return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-								.body(RESTfulErrorEntity.of("Bad request body: " + reqBodyJson, e));
-		}
-    	
-    	Either<OperationSession, ResponseEntity<RESTfulErrorEntity>> result = start(opId, reqBody);
+    @PostMapping("/operations")
+    public ResponseEntity<?> run(@RequestBody String requestJson)
+    	throws TimeoutException, CancellationException, InterruptedException, ExecutionException, IOException {
+    	OperationRequest request = OperationRequest.parseJsonString(requestJson);
+    	Either<OperationSession, ResponseEntity<RESTfulErrorEntity>> result = start(request);
     	if ( result.isRight() ) {
     		return result.right().get();
     	}
     	
-    	OperationSession opSession = result.left().get();
-    	ProgramOperationDescriptor opDesc = opSession.m_task.getOperationDescriptor();
+    	OperationSession session = result.left().get();
+    	if ( session.m_request.isAsync() ) {
+    		OperationResponse resp = OperationResponse.running(session.m_sessionId, "Operation is running");
+    		try {
+    			return ResponseEntity.created(new URI("")).body(resp);
+    		}
+    		catch ( URISyntaxException e ) {
+    			throw new InternalException("invalid 'Location': " + session.m_opId);
+    		}
+    	}
+    	else {
+    		return awaitExecution(session);
+    	}
+    }
+    
+    private ResponseEntity<String> awaitExecution(OperationSession session)
+    	throws ExecutionException, CancellationException, InterruptedException, TimeoutException {
+    	ProgramOperationConfiguration config = session.getProgramOperationConfiguration();
 		try {
-			Duration timeout = opDesc.getTimeout();
+			Duration timeout = config.getTimeout();
 			if ( timeout != null ) {
-				opSession.m_task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+				session.m_cmdExec.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
 			}
 			else {
-				opSession.m_task.get();
+				session.m_cmdExec.get();
 			}
-    		return buildResponse(opSession);
+			
+    		try {
+				return buildResponse(session);
+			}
+			catch ( IOException e ) {
+				throw new ExecutionException("Failed to update output port", e);
+			}
 		}
 		finally {
-			m_sessions.remove(opSession.m_sessionId);
-		}
-    }
-
-    @PostMapping("/operations/{opId}/async")
-    public ResponseEntity<?> runAsync(@PathVariable("opId") String encodedOpId,
-    									@RequestBody String reqBodyJson)
-    	throws TimeoutException, CancellationException, InterruptedException, ExecutionException {
-    	String opId = AASUtils.decodeBase64UrlSafe(encodedOpId);
-    	OperationRequestBody reqBody;
-		try {
-			reqBody = OperationRequestBody.parseJsonString(reqBodyJson);
-		}
-		catch ( IOException e ) {
-			return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-								.body(RESTfulErrorEntity.of("Bad request body: " + reqBodyJson, e));
-		}
-    	
-    	Either<OperationSession, ResponseEntity<RESTfulErrorEntity>> result = start(opId, reqBody);
-    	if ( result.isRight() ) {
-    		return result.right().get();
-    	}
-
-    	OperationSession opSession = result.left().get();
-		OperationResponse resp = OperationResponse.running(opSession.m_sessionId, "Operation is running");
-		try {
-			return ResponseEntity.created(new URI("")).body(resp);
-		}
-		catch ( URISyntaxException e ) {
-			throw new InternalException("invalid 'Location': " + opSession.m_opId);
+			m_sessions.remove(session.getSessionId());
 		}
     }
 
     @GetMapping("/sessions/{session}")
-    public ResponseEntity<?> status(@PathVariable("session") String sessionId) {
-    	sessionId = AASUtils.decodeBase64UrlSafe(sessionId);
-    	
+    public ResponseEntity<?> status(@PathVariable("session") String sessionId) throws IOException {
     	m_guard.lock();
     	try {
     		OperationSession session = m_sessions.get(sessionId);
     		
     		// Operation id에 해당하는 실행 등록 정보가 없는 경우에는 NOT_FOUND 오류를 발생시킨다.
     		if ( session == null ) {
+    			// 작업은 종료되었지만, 클라이언트까지 결과가 전달되지 않은 경우
     			OperationSession closedSession = m_closedSessions.getIfPresent(sessionId);
     			if ( closedSession != null ) {
     	    		return buildResponse(closedSession);
@@ -174,13 +167,9 @@ public class MDTOperationDispatcher implements InitializingBean {
 	    								.body(RESTfulErrorEntity.ofMessage(msg));
     			}
     		}
-    		
-    		if ( session.m_task.isFinished() ) {
-    			removeOperationSessionInGuard(sessionId);
-        		m_guard.signalAllInGuard();
+    		else {
+    			return buildResponse(session);
     		}
-    		
-    		return buildResponse(session);
     	}
     	finally {
     		m_guard.unlock();
@@ -189,13 +178,11 @@ public class MDTOperationDispatcher implements InitializingBean {
 
     @DeleteMapping("/sessions/{session}")
     public ResponseEntity<Void> delete(@PathVariable("session") String sessionId) {
-    	sessionId = AASUtils.decodeBase64UrlSafe(sessionId);
-    	
     	m_guard.lock();
     	try {
     		OperationSession opExec = m_sessions.remove(sessionId);
     		if ( opExec != null ) {
-        		opExec.m_task.cancel(true);
+        		opExec.m_cmdExec.cancel(true);
     		}
     		
     		return ResponseEntity.status(HttpStatus.NO_CONTENT)
@@ -208,11 +195,8 @@ public class MDTOperationDispatcher implements InitializingBean {
     
     @ExceptionHandler()
     public ResponseEntity<RESTfulErrorEntity> handleException(Exception e) {
-    	if ( e instanceof ExecutionException ) {
-    		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-    								.body(RESTfulErrorEntity.of(e));
-    	}
 		Throwable cause = Throwables.unwrapThrowable(e);
+		s_logger.error("Exception raised: " + e);
     	if ( cause instanceof IllegalArgumentException ) {
     		return ResponseEntity.status(HttpStatus.BAD_REQUEST)
     								.body(RESTfulErrorEntity.of(cause));
@@ -221,55 +205,64 @@ public class MDTOperationDispatcher implements InitializingBean {
     		return ResponseEntity.status(HttpStatus.REQUEST_TIMEOUT)
     								.body(RESTfulErrorEntity.of(cause));
     	}
+    	else if ( cause instanceof ResourceNotFoundException ) {
+    		return ResponseEntity.badRequest().body(RESTfulErrorEntity.of(cause));
+    	}
     	else {
     		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
     								.body(RESTfulErrorEntity.of(cause));
     	}
     }
 
-    private Either<OperationSession, ResponseEntity<RESTfulErrorEntity>> start(String opId,
-    																			OperationRequestBody reqBody) {
+    private Either<OperationSession, ResponseEntity<RESTfulErrorEntity>> start(OperationRequest request) {
+		String opId = request.getOperation();
+		
     	File opHome = new File(m_homeDir, opId);
     	if ( !opHome.isDirectory() ) {
-    		ResourceNotFoundException ex = new ResourceNotFoundException("Operation", "opId=" + opId);
+    		s_logger.error("Invalid operation home directory: op={}, dir={}", opId, opHome);
+    		
+    		ResourceNotFoundException ex = new ResourceNotFoundException("Operation", "operation=" + opId);
 			return Either.right(ResponseEntity.badRequest().body(RESTfulErrorEntity.of(ex)));
     	}
+    	
+    	OperationSession session = OperationSession.create(request);
 
-    	OperationSession session;
+		File opConfigFile = new File(opHome, "operation.json");
     	try {
-        	File opDescFile = new File(opHome, "operation.json");
-    		ProgramOperationDescriptor opDesc = ProgramOperationDescriptor.load(opDescFile,
-    																			MDTModelSerDe.getJsonMapper());
+    		ProgramOperationConfiguration opConfig = MDTModelSerDe.readValue(opConfigFile,
+    																		ProgramOperationConfiguration.class);
+    		session.setProgramOperationConfiguration(opConfig);
     		
-    		// working directory가 별도로 설정되어 있지 않으면
-    		// 기본 directory로 설정한다.
-    		FOption.ifAbsent(opDesc.getWorkingDirectory(), () -> opDesc.setWorkingDirectory(opHome));
-    		
-    		ProgramTask task = new ProgramTask(opDesc);
-    		task.setMDTInstanceManager(m_manager);
-    		
-    		// OperationRequestBody의 파라미터들을 outputNames에 포함 여부에 따라
-    		// input parameter와 output parameter로 분리하고, 각각을 Task에 추가한다.
-    		Tuple<List<Parameter>,List<Parameter>> parts
-    				= Funcs.partition(reqBody.getParameters(), p -> reqBody.getOutputNames().contains(p.getName()));
-    		parts._2.forEach(task::addOrReplaceInputParameter);
-    		parts._1.forEach(task::addOrReplaceOutputParameter);
-    		
-    		session = OperationSession.create(opId, task);
+    		if ( opConfig.getWorkingDirectory() == null ) {
+    			opConfig.setWorkingDirectory(opHome);
+    		}
     	}
     	catch ( IOException e ) {
-    		String msg = String.format("Failed to create CommandExecution: cause=%s", e);
+    		String msg = String.format("Failed to read ProgramOperationConfiguration: path=%s, cause=%s",
+    									opConfigFile, e);
     		s_logger.error(msg);
     		
     		return Either.right(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
     											.body(RESTfulErrorEntity.ofMessage(msg)));
     	}
+    
+		try {
+			CommandExecution cmdExec = buildCommandExecution(session);
+			session.setCommandExecution(cmdExec);
+		}
+		catch ( TaskException e ) {
+    		String msg = String.format("Failed to create CommandExecution: cause=%s", e);
+    		s_logger.error(msg);
+    		
+    		return Either.right(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+    											.body(RESTfulErrorEntity.ofMessage(msg)));
+		}
     	
     	m_guard.lock();
     	try {
     		// 동시 연산 수행을 지원하지 않는 경우에는 동일 연산이 수행 중인 경우에 예외를 발생시킨다.
-    		if ( !session.m_task.getOperationDescriptor().isConcurrent() ) {
-    			boolean existsOp = FStream.from(m_sessions)
+    		if ( !session.getProgramOperationConfiguration().isConcurrentExecution() ) {
+    			boolean existsOp = KeyValueFStream.from(m_sessions)
 					    					.filterValue(s -> s.m_opId.equals(opId))
 					    					.exists();
     			if ( existsOp ) {
@@ -281,53 +274,164 @@ public class MDTOperationDispatcher implements InitializingBean {
     		m_sessions.put(session.m_sessionId, session);
     		
     		// CommandExecution이 종료되면
-    		session.m_task.whenFinished(result -> {
-    			OperationSession closed = m_sessions.remove(session.m_sessionId);
-    			if ( closed != null ) {
-    				m_closedSessions.put(session.m_sessionId, closed);
+    		session.m_cmdExec.whenFinished(result -> {
+    			m_guard.lock();
+    			try {
+	    			OperationSession closed = m_sessions.remove(session.m_sessionId);
+	    			if ( closed != null ) {
+	        			try {
+							updateOutputArguments(session);
+						}
+						catch ( IOException e ) {
+							s_logger.error("Failed to update output arguments: cause=" + e);
+						}
+						closed.close();
+	    				m_closedSessions.put(session.m_sessionId, closed);
+	    			}
+    			}
+    			finally {
+    				m_guard.unlock();
     			}
     		});
     		
-    		m_guard.signalAllInGuard();
+    		m_guard.signalAll();
     	}
     	finally {
     		m_guard.unlock();
     	}
 
-    	session.m_task.start();
+    	session.m_cmdExec.start();
 		return Either.left(session);
     }
     
-    private ResponseEntity<OperationResponse> buildResponse(OperationSession session) {
+    private ResponseEntity<String> buildResponse(OperationSession session) throws IOException {
     	String sessId = session.m_sessionId;
-    	ProgramTask task = session.m_task;
-    	switch ( task.getState() ) {
-    		case RUNNING:
-    			return ResponseEntity.status(HttpStatus.OK)
-									.body(OperationResponse.running(sessId, "Operation is running"));
-    		case COMPLETED:
-        		return ResponseEntity.status(HttpStatus.OK)
-    								.body(OperationResponse.completed(sessId, task.getOutputValues()));
-    		case FAILED:
-    			return ResponseEntity.status(HttpStatus.OK)
-									.body(OperationResponse.failed(sessId, task.getResult().getCause()));
-    		case CANCELLED:
-    			return ResponseEntity.status(HttpStatus.OK)
-									.body(OperationResponse.cancelled(sessId, "Operation is cancelled"));
-    		case CANCELLING:
-    			return ResponseEntity.status(HttpStatus.OK)
-									.body(OperationResponse.cancelled(sessId, "Operation is cancelling"));
-    		case STARTING:
-    			return ResponseEntity.status(HttpStatus.OK)
-									.body(OperationResponse.cancelled(sessId, "Operation is starting"));
-    		case NOT_STARTED:
-    			return ResponseEntity.status(HttpStatus.OK)
-									.body(OperationResponse.cancelled(sessId, "Operation is not found"));
-    		default:
-    			String msg = "Unexpected execution status: " + task.getState();
-    			throw new InternalException(msg);
-    	}
+    	CommandExecution exec = session.m_cmdExec;
+    	OperationResponse resp = switch ( exec.getState() ) {
+    		case RUNNING -> OperationResponse.running(sessId, "Operation is running");
+    		case COMPLETED -> OperationResponse.completed(sessId, session.m_request.getOutputVariables());
+    		case FAILED -> OperationResponse.failed(sessId, exec.getResult().getCause());
+    		case CANCELLED -> OperationResponse.cancelled(sessId, "Operation is cancelled");
+    		case CANCELLING -> OperationResponse.cancelled(sessId, "Operation is cancelling");
+    		case STARTING -> OperationResponse.cancelled(sessId, "Operation is starting");
+    		case NOT_STARTED -> OperationResponse.cancelled(sessId, "Operation is not found");
+    		default -> throw new InternalException("Unexpected execution status: " + exec.getState());
+    	};
+    	
+    	return ResponseEntity.status(HttpStatus.OK).body(MDTModelSerDe.toJsonString(resp));
+//    	switch ( exec.getState() ) {
+//    		case RUNNING:
+//    			return ResponseEntity.status(HttpStatus.OK)
+//									.body(OperationResponse.running(sessId, "Operation is running"));
+//    		case COMPLETED:
+//        		return ResponseEntity.status(HttpStatus.OK)
+//    								.body(OperationResponse.completed(sessId, session.m_request.getOutputVariables()));
+//    		case FAILED:
+//    			return ResponseEntity.status(HttpStatus.OK)
+//									.body(OperationResponse.failed(sessId, exec.getResult().getCause()));
+//    		case CANCELLED:
+//    			return ResponseEntity.status(HttpStatus.OK)
+//									.body(OperationResponse.cancelled(sessId, "Operation is cancelled"));
+//    		case CANCELLING:
+//    			return ResponseEntity.status(HttpStatus.OK)
+//									.body(OperationResponse.cancelled(sessId, "Operation is cancelling"));
+//    		case STARTING:
+//    			return ResponseEntity.status(HttpStatus.OK)
+//									.body(OperationResponse.cancelled(sessId, "Operation is starting"));
+//    		case NOT_STARTED:
+//    			return ResponseEntity.status(HttpStatus.OK)
+//									.body(OperationResponse.cancelled(sessId, "Operation is not found"));
+//    		default:
+//    			String msg = "Unexpected execution status: " + exec.getState();
+//    			throw new InternalException(msg);
+//    	}
     }
+    
+    private void updateOutputArguments(OperationSession session) throws IOException {
+    	FStream.from(session.m_request.getOutputVariables())
+    			.tagKey(Variable::getName)
+				.innerJoin(KeyValueFStream.from(session.m_cmdExec.getVariableMap()))
+				.forEachOrThrow(match -> {
+					Variable var = match.value()._1;
+					CommandVariable cmdVar = match.value()._2;
+					
+					if ( var instanceof ReferenceVariable rvar ) {
+						rvar.activate(m_manager);
+					}
+					
+					String cmdVarValue = cmdVar.getValue();
+					try {
+						var.updateWithValueJsonString(cmdVarValue);
+					}
+					catch ( JsonParseException e ) {
+						var.updateWithRawString(cmdVarValue);
+					}
+				});
+    }
+
+	private CommandExecution buildCommandExecution(OperationSession session) throws TaskException {
+		ProgramOperationConfiguration config = session.getProgramOperationConfiguration();
+		File workingDir = config.getWorkingDirectory();
+		
+		CommandExecution.Builder builder = CommandExecution.builder()
+															.addCommand(config.getCommandLine())
+															.setWorkingDirectory(workingDir)
+															.setTimeout(config.getTimeout());
+		
+		FStream.from(session.m_request.getInputVariables())
+				.concatWith(FStream.from(session.m_request.getOutputVariables()))
+		        .peek(var -> {
+					if ( var instanceof ReferenceVariable refVar ) {
+						refVar.activate(m_manager);
+					}
+		        })
+				.mapOrThrow(port -> newCommandVariable(workingDir, port))
+				.forEachOrThrow(builder::addVariableIfAbscent);
+
+		// stdout/stderr redirection
+		builder.redirectErrorStream();
+		builder.redictStdoutToFile(new File(workingDir, "output.log"));
+		
+		return builder.build();
+	}
+	
+	private FileVariable newCommandVariable(File workingDir, Variable variable) throws TaskException {
+		File file = null;
+		try {
+			ElementValue value = variable.readValue();
+			
+			if ( value instanceof FileValue ) {
+				if ( variable instanceof ReferenceVariable refPort ) {
+					MDTElementReference dref = (MDTElementReference) refPort.getReference();
+					AASFile mdtFile = dref.getSubmodelService().getFileByPath(dref.getIdShortPathString());
+
+					String fileName = String.format("%s.%s", variable.getName(),
+													FilenameUtils.getExtension(mdtFile.getPath()));
+					file = new File(workingDir, fileName);
+					IOUtils.toFile(mdtFile.getContent(), file);
+
+					return new FileVariable(variable.getName(), file);
+				}
+				else {
+					throw new TaskException("TaskPort should be a ReferencePort: port=" + variable);
+				}
+			}
+			else {
+				// PropertyValue인 경우, 바로 JSON으로 출력하면 double-quote가 추가되기 때문에
+				// 이를 막기 위해 값을 직접 저장한다.
+				file = new File(workingDir, variable.getName());
+				String extStr = (value instanceof PropertyValue pvalue)
+								? pvalue.get() : MDTModelSerDe.toJsonString(value);
+				IOUtils.toFile(extStr, StandardCharsets.UTF_8, file);
+				
+				return new FileVariable(variable.getName(), file);
+			}
+		}
+		catch ( IOException e ) {
+			throw new InternalException("Failed to write value to file: name=" + variable.getName()
+										+ ", path=" + file.getAbsolutePath(), e);
+		}
+	}
     
     private OperationSession removeOperationSessionInGuard(String opId) {
     	if ( s_logger.isDebugEnabled() ) {
@@ -337,71 +441,53 @@ public class MDTOperationDispatcher implements InitializingBean {
     	return m_sessions.remove(opId);
     }
 	
-	private static class OperationSession {
+	private static class OperationSession implements AutoCloseable {
 		private final String m_opId;
+		private final OperationRequest m_request;
+		private ProgramOperationConfiguration m_config;
 		private volatile String m_sessionId;
-		private final ProgramTask m_task;
+		private CommandExecution m_cmdExec;
 		
-		public static OperationSession create(String opId, ProgramTask task) {
-			OperationSession session = new OperationSession(opId, task);
+		private OperationSession(OperationRequest request) {
+			m_opId = request.getOperation();
+			m_request = request;
+		}
+		
+		public static OperationSession create(OperationRequest request) {
+			OperationSession session = new OperationSession(request);
 			session.m_sessionId = Integer.toHexString(session.hashCode());
 			
 			return session;
 		}
 		
-		private OperationSession(String opId, ProgramTask task) {
-			m_opId = opId;
-			m_task = task;
+		public void close() {
+			m_cmdExec.close();
+		}
+		
+		public String getOperation() {
+			return m_opId;
+		}
+		
+		public String getSessionId() {
+			return m_sessionId;
+		}
+		
+		public ProgramOperationConfiguration getProgramOperationConfiguration() {
+			return m_config;
+		}
+		
+		public void setProgramOperationConfiguration(ProgramOperationConfiguration config) {
+			m_config = config;
+		}
+		
+		public CommandExecution getCommandExecution() {
+			return m_cmdExec;
+		}
+		
+		public void setCommandExecution(CommandExecution cmdExec) {
+			m_cmdExec = cmdExec;
 		}
 	}
-
-//	private ProgramOperationConfiguration loadProgramOperationConfiguration(File rootDir, JsonNode confNode)
-//		throws IOException {
-//		String confStr = MAPPER.writeValueAsString(confNode);
-//		
-//		// Windows OS의 경우 환경 변수 내 파일 경로명에 포함된 file separator가 '\'이기 때문에
-//		// 이 값을 이용하여 string substitution을 사용하여 JSON 파일 구성하면
-//		// 이 '\'가 escape character로 간주되어 문제를 유발한다.
-//		// 이를 해결하기 위해 '\'를 '/'로 대체시킨다.
-//		Map<String,String> vars = FStream.from(System.getenv())
-//										.mapValue(v -> v.replaceAll("\\\\", "/"))
-//										.toMap();
-//		vars.put("MDT_OPERATION_SERVER_DIR", rootDir.getAbsolutePath().replaceAll("\\\\", "/"));
-//		
-//		// 일단 MDT_OPERATION_SERVER_DIR 만 포함시킨채로 variable-replacement를 실시한 
-//		// 상태에서 설정 정보를 파싱한다.
-//		confStr = Utilities.substributeString(confStr, vars);
-//		ProgramOperationConfiguration poConf = MAPPER.readValue(confStr, ProgramOperationConfiguration.class);
-//
-//		
-//		// MDT_OPERATION_DIR를 설정한 상태에서 variable-replacement를 실시한 설정 정보를 다시 파싱한다.
-//		String opWorkDir = FOption.getOrElse(poConf.getWorkingDirectory(),
-//												new File(rootDir, poConf.getId()).getAbsolutePath());
-//		opWorkDir = opWorkDir.replaceAll("\\\\", "/");
-//		vars.put("MDT_OPERATION_DIR", opWorkDir);
-//		opWorkDir = Utilities.substributeString(opWorkDir, vars);
-//		
-//		if ( !new File(opWorkDir).isDirectory() ) {
-//			s_logger.error("  failed to program operation: id={}: invalid directory {} -> ignored",
-//							poConf.getId(), opWorkDir);
-//			return null;
-//		}
-//		
-//		poConf.setWorkingDirectory(opWorkDir);
-//		
-//		confStr = Utilities.substributeString(confStr, vars);
-//		poConf = MAPPER.readValue(confStr, ProgramOperationConfiguration.class);
-//		if ( poConf.getWorkingDirectory() == null ) {
-//			poConf.setWorkingDirectory(opWorkDir);
-//		}
-//		
-//		if ( s_logger.isInfoEnabled() ) {
-//			s_logger.info("  loading program operation: id={}, dir={}", poConf.getId(),
-//							poConf.getWorkingDirectory());
-//		}
-//		
-//		return poConf;
-//	}
 }
 
 

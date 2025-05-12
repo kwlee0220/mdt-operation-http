@@ -3,6 +3,7 @@ package mdt.operation.http.skku;
 import static mdt.model.sm.SubmodelUtils.cast;
 import static mdt.model.sm.SubmodelUtils.traverse;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
@@ -47,7 +48,7 @@ import utils.async.StartableExecution;
 import utils.async.op.AsyncExecutions;
 import utils.func.Funcs;
 
-import mdt.client.instance.HttpMDTInstanceManagerClient;
+import mdt.client.instance.HttpMDTInstanceManager;
 import mdt.client.operation.OperationStatus;
 import mdt.client.operation.OperationStatusResponse;
 import mdt.client.resource.ExtendedSubmodelService;
@@ -73,7 +74,7 @@ public class SKKUOperationServer implements InitializingBean {
 	private static final JsonMapper s_deser = new JsonMapper();
 	private static final JsonSerializer s_ser = new JsonSerializer();
 	
-	@Autowired private HttpMDTInstanceManagerClient m_mdtClient;
+	@Autowired private HttpMDTInstanceManager m_mdtClient;
 //	@Autowired private MDTSimulatorConfiguration m_config;
 	
 	@Value("${simulation-endpoint}")
@@ -256,7 +257,7 @@ public class SKKUOperationServer implements InitializingBean {
 		throw new IllegalArgumentException("Invalid Simulation request: " + parameters);
 	}
 
-    private StartableExecution<List<String>> startSimulation(Submodel submodel) {
+    private StartableExecution<List<String>> startSimulation(Submodel submodel) throws IOException {
 		Preconditions.checkArgument(submodel != null);
 		
 		SubmodelElement info = SubmodelUtils.traverse(submodel, "SimulationInfo");
@@ -285,7 +286,7 @@ public class SKKUOperationServer implements InitializingBean {
 		return simulation;
     }
 
-	private Map<String,String> loadInputs(SubmodelElement simulationInfo) {
+	private Map<String,String> loadInputs(SubmodelElement simulationInfo) throws IOException {
 		Map<String,String> inputValues = Maps.newLinkedHashMap();
 		
 		SubmodelElementList inputs = cast(traverse(simulationInfo, "Inputs"), SubmodelElementList.class);
@@ -310,7 +311,7 @@ public class SKKUOperationServer implements InitializingBean {
 		return outputVariableNames;
 	}
 	
-	private String derefSubmodelElementString(SubmodelElement sme) {
+	private String derefSubmodelElementString(SubmodelElement sme) throws IOException {
 		if ( sme instanceof Property prop ) {
 			return prop.getValue();
 		}

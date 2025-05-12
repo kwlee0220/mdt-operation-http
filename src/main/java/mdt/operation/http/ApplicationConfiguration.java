@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import mdt.client.HttpMDTManagerClient;
+import mdt.client.HttpMDTManager;
 import mdt.operation.http.skku.SKKUSimulatorConfiguration;
 
 /**
@@ -21,8 +21,8 @@ public class ApplicationConfiguration {
 	private String m_mdtEndpoint;
 
 	@Bean
-	HttpMDTManagerClient getMDTManagerClient() throws KeyManagementException, NoSuchAlgorithmException {
-		return HttpMDTManagerClient.connect(m_mdtEndpoint);
+	HttpMDTManager getMDTManagerClient() throws KeyManagementException, NoSuchAlgorithmException {
+		return HttpMDTManager.connect(m_mdtEndpoint);
 	}
 	
 	@Bean
