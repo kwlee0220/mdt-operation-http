@@ -34,6 +34,9 @@ dependencies {
 
 	// Guava (from the project :utils)
 	implementation "com.google.guava:guava:${guava_version}"
+	
+	// Checker framework
+	implementation("org.checkerframework:checker:${checker_version}")
 
 	// Lombok (from the project :utils)
 	compileOnly "org.projectlombok:lombok:${lombok_version}"
