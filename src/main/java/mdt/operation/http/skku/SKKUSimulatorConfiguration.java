@@ -16,12 +16,12 @@ import lombok.Setter;
  */
 @Getter @Setter
 public class SKKUSimulatorConfiguration {
-	@Nullable private String simulatorEndpoint;
+	private @Nullable String simulatorEndpoint;
 	private String simulationSubmodelRefString;
 	private File workingDirectory;
 	private List<String> command;
-	@Nullable private Duration timeout;
-	@Nullable private Duration sessionRetainTimeout;
+	private @Nullable Duration timeout;
+	private @Nullable Duration sessionRetainTimeout;
 	
 	public void setTimeout(String durStr) {
 		timeout = Duration.parse(durStr);

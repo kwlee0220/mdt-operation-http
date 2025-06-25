@@ -25,10 +25,10 @@ import utils.func.FOption;
 @JsonInclude(Include.NON_NULL)
 public class ProgramOperationConfiguration {
 	private List<String> m_commandLine;
-	@Nullable private File m_workingDirectory;
+	private @Nullable File m_workingDirectory;
 	private boolean m_async = true;
-	@Nullable private Duration m_timeout;
-	@Nullable private Duration m_sessionRetainTimeout;
+	private @Nullable Duration m_timeout;
+	private @Nullable Duration m_sessionRetainTimeout;
 	private boolean m_concurrentExecution = false;
 	
 	@JsonCreator
