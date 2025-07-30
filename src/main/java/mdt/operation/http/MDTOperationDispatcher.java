@@ -383,7 +383,7 @@ public class MDTOperationDispatcher implements InitializingBean {
 
 		// stdout/stderr redirection
 		builder.redirectErrorStream();
-		builder.redictStdoutToFile(new File(workingDir, "output.log"));
+		builder.redirectStdoutToFile(new File(workingDir, "output.log"));
 		
 		return builder.build();
 	}
