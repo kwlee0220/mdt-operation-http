@@ -1,9 +1,7 @@
 plugins {
 	id 'java'
-	id 'application'
-	id 'eclipse'
-	id 'org.springframework.boot' version '3.2.4'
-	id 'io.spring.dependency-management' version '1.1.4'
+	id 'org.springframework.boot' version '3.5.4'
+	id 'io.spring.dependency-management' version '1.1.7'
 }
 
 group = 'etri'
@@ -13,7 +11,6 @@ java {
 	sourceCompatibility = JavaVersion.VERSION_17
 	targetCompatibility = JavaVersion.VERSION_17
 }
-
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
@@ -21,6 +18,9 @@ tasks.withType(JavaCompile).configureEach {
 configurations {
 	compileOnly {
 		extendsFrom annotationProcessor
+	}
+	all {
+		exclude group: 'commons-logging', module: 'commons-logging'
 	}
 }
 
@@ -36,55 +36,21 @@ dependencies {
 	
 	// Checker framework
 	implementation("org.checkerframework:checker:${checker_version}")
-
-	// Lombok (from the project :utils)
-	compileOnly "org.projectlombok:lombok:${lombok_version}"
-	annotationProcessor "org.projectlombok:lombok:${lombok_version}"
 	
 	// AAS model
 	implementation "org.eclipse.digitaltwin.aas4j:aas4j-dataformat-json:${aas4j_version}"
 
-	// Spring boot
-	implementation "org.springframework.boot:spring-boot-starter-web:${spring_boot_version}"
+    // SpringBoot dependencies
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	compileOnly 'org.projectlombok:lombok'
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	annotationProcessor 'org.projectlombok:lombok'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${springdoc_version}"
 }
 
 bootJar {
 	mainClass = 'mdt.operation.http.MDTHttpOperationServerApplication'
-}
-
-eclipse {
-	classpath {
-		file {
-			withXml {
-				def node = it.asNode()
-				node.appendNode('classpathentry', [kind: 'output', path: 'build/classes'])
-			}
-			
-			whenMerged { cp ->
-				Map entryByPath = cp.entries.groupBy { entry -> entry.path }
-				entryByPath.each { key, values ->
-					if ( values.size() > 1 ) {
-						def entry = values.first()
-						if ( entry.kind == 'src' ) {
-							entry.includes = []
-							entry.excludes = []
-						}
-						int index = cp.entries.indexOf entry
-						cp.entries.removeAll values
-						cp.entries.add index, entry
-					}
-				}
-				cp.entries.each { entry ->
-					if ( entry.kind == 'src' && entry.hasProperty('output') ) {
-						if ( entry.path.contains('/test/') ) {
-							entry.output = 'build/test_classes'
-						}
-						else {
-							entry.output = 'build/classes'
-						}
-					}
-				}
-			}
-		}
-	}
 }
