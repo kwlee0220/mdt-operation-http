@@ -33,6 +33,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.google.common.base.Preconditions;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.RemovalCause;
+import com.google.common.cache.RemovalNotification;
 import com.google.common.collect.Maps;
 
 import utils.InternalException;
@@ -86,6 +88,7 @@ public class MDTOperationDispatcher implements InitializingBean {
 														= CacheBuilder.newBuilder()
 //																		.expireAfterAccess(SESSION_RETAIN_TIMEOUT)
 																		.expireAfterWrite(SESSION_RETAIN_TIMEOUT)
+																		.removalListener(this::onClosedSessionExpired)
 																		.build();
 
 	@Override
@@ -160,12 +163,13 @@ public class MDTOperationDispatcher implements InitializingBean {
     	    		return buildResponse(closedSession);
     			}
     			else {
-	    			String msg = "Operation is not found: opId=" + sessionId;
+	    			String msg = "OperationSession is not found: session=" + closedSession;
 	    			return ResponseEntity.status(HttpStatus.NOT_FOUND)
 	    								.body(RESTfulErrorEntity.ofMessage(msg));
     			}
     		}
     		else {
+    			// 작업이 수행 중인 경우
     			return buildResponse(session);
     		}
     	}
@@ -270,6 +274,9 @@ public class MDTOperationDispatcher implements InitializingBean {
     			}
     		}
     		m_sessions.put(session.m_sessionId, session);
+    		if ( s_logger.isDebugEnabled() ) {
+    			
+    		}
     		
     		// CommandExecution이 종료되면
     		session.m_cmdExec.whenFinished(result -> {
@@ -280,11 +287,12 @@ public class MDTOperationDispatcher implements InitializingBean {
 	        			try {
 							updateOutputArguments(session);
 						}
-						catch ( IOException e ) {
+						catch ( Throwable e ) {
 							s_logger.error("Failed to update output arguments: cause=" + e);
 						}
 						closed.close();
 	    				m_closedSessions.put(session.m_sessionId, closed);
+	    				s_logger.debug("add finished operation to closed-session list: session={}", session);
 	    			}
     			}
     			finally {
@@ -358,7 +366,7 @@ public class MDTOperationDispatcher implements InitializingBean {
 					}
 					
 					String cmdVarValue = cmdVar.getValue();
-					var.updateWithValueJsonString(cmdVarValue);
+					var.updateValue(cmdVarValue);
 				});
     }
 
@@ -430,6 +438,12 @@ public class MDTOperationDispatcher implements InitializingBean {
     	return m_sessions.remove(opId);
     }
 	
+	private void onClosedSessionExpired(RemovalNotification<String, OperationSession> noti) {
+		if ( noti.wasEvicted() && noti.getCause() == RemovalCause.EXPIRED ) {
+			s_logger.debug("expired closed-session: session={}", noti.getKey());
+		}
+	}
+	
 	private static class OperationSession implements AutoCloseable {
 		private final String m_opId;
 		private final OperationRequest m_request;
@@ -475,6 +489,12 @@ public class MDTOperationDispatcher implements InitializingBean {
 		
 		public void setCommandExecution(CommandExecution cmdExec) {
 			m_cmdExec = cmdExec;
+		}
+		
+		@Override
+		public String toString() {
+			return String.format("OperationSession{id=%s, op=%s, state=%s}",
+										m_sessionId, m_opId, m_cmdExec.getState());
 		}
 	}
 }
