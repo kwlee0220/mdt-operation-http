@@ -39,10 +39,10 @@ import com.google.common.collect.Maps;
 
 import utils.InternalException;
 import utils.Throwables;
-import utils.async.CommandExecution;
-import utils.async.CommandVariable;
-import utils.async.CommandVariable.FileVariable;
 import utils.async.Guard;
+import utils.async.command.CommandExecution;
+import utils.async.command.CommandVariable;
+import utils.async.command.CommandVariable.FileVariable;
 import utils.func.Either;
 import utils.func.FOption;
 import utils.http.RESTfulErrorEntity;
