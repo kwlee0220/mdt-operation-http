@@ -25,11 +25,11 @@ public class ApplicationConfiguration {
 		return HttpMDTManager.connect(m_mdtEndpoint);
 	}
 	
-//	@Bean
-//	@ConfigurationProperties(prefix = "operation-server")
-//	OperationServerConfiguration getOperationServerConfiguration() {
-//		return new OperationServerConfiguration();
-//	}
+	@Bean
+	@ConfigurationProperties(prefix = "operation-server")
+	OperationServerConfiguration getOperationServerConfiguration() {
+		return new OperationServerConfiguration();
+	}
 	
 	@Bean
 	@ConfigurationProperties(prefix = "skku")
