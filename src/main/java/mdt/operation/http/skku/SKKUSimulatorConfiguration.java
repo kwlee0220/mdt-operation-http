@@ -6,6 +6,8 @@ import java.util.List;
 
 import javax.annotation.Nullable;
 
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
 import lombok.Getter;
 import lombok.Setter;
 
@@ -14,6 +16,7 @@ import lombok.Setter;
  *
  * @author Kang-Woo Lee (ETRI)
  */
+@ConfigurationProperties(prefix = "skku")
 @Getter @Setter
 public class SKKUSimulatorConfiguration {
 	private @Nullable String simulatorEndpoint;

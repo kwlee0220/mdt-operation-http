@@ -51,9 +51,9 @@ import utils.io.IOUtils;
 import utils.stream.FStream;
 import utils.stream.KeyValueFStream;
 
+import mdt.client.HttpMDTManager;
 import mdt.client.operation.OperationRequest;
 import mdt.client.operation.OperationResponse;
-import mdt.model.MDTManager;
 import mdt.model.MDTModelSerDe;
 import mdt.model.ResourceNotFoundException;
 import mdt.model.instance.MDTInstanceManager;
@@ -77,7 +77,6 @@ public class MDTOperationDispatcher implements InitializingBean {
 	private static final Logger s_logger = LoggerFactory.getLogger(MDTOperationDispatcher.class);
 	private static final Duration SESSION_RETAIN_TIMEOUT = Duration.ofMinutes(5);
 	
-	@Autowired private MDTManager m_mdt;
 	private MDTInstanceManager m_manager;
 	@Autowired private OperationServerConfiguration m_config;
 	private File m_homeDir;
@@ -93,8 +92,10 @@ public class MDTOperationDispatcher implements InitializingBean {
 
 	@Override
 	public void afterPropertiesSet() throws Exception {
-		Preconditions.checkState(m_mdt != null);
-		m_manager = m_mdt.getInstanceManager();
+		Preconditions.checkState(m_config != null);
+
+		HttpMDTManager mdt = HttpMDTManager.connect(m_config.getInstanceManagerEndpoint());
+		m_manager = mdt.getInstanceManager();
 		
 		// 설정 파일에 'homeDir'이 지정되지 않은 경우에는 'operations' 파일이 위치한
 		// 디렉토리를 사용한다.

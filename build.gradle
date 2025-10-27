@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'etri'
-version = '1.2'
+version = System.getenv("MDT_BUILD_VERSION") ?: "unknown"
 
 java {
 	sourceCompatibility = JavaVersion.VERSION_17

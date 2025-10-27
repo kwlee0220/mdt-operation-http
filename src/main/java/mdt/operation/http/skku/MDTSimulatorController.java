@@ -66,6 +66,7 @@ import mdt.operation.MDTSimulator;
 import mdt.operation.SimulationRequest;
 import mdt.operation.SimulationSession;
 import mdt.operation.ThreadedMDTSimulation;
+import mdt.operation.http.OperationServerConfiguration;
 import mdt.operation.subprocess.SubprocessSimulator;
 
 
@@ -81,7 +82,7 @@ public class MDTSimulatorController implements InitializingBean {
 	private static final JsonMapper s_deser = new JsonMapper();
 	private static final JsonSerializer s_ser = new JsonSerializer();
 
-	@Autowired private HttpMDTManager m_mdt;
+	@Autowired private OperationServerConfiguration m_opConfig;
 	private HttpMDTInstanceManager m_manager;
 	@Autowired private SKKUSimulatorConfiguration m_config;
 	
@@ -106,8 +107,9 @@ public class MDTSimulatorController implements InitializingBean {
 	public void afterPropertiesSet() throws Exception {
 		Preconditions.checkState(m_config.getSimulationSubmodelRefString() != null,
 								"Simulation Submodel is missing");
-		
-		m_manager = m_mdt.getInstanceManager();
+
+		HttpMDTManager mdt = HttpMDTManager.connect(m_opConfig.getInstanceManagerEndpoint());
+		m_manager = mdt.getInstanceManager();
 		
 //		SubmodelService simulationSvc = SubmodelReference.parseString(m_mdtClient,
 //																m_config.getSimulationSubmodelRefString())
