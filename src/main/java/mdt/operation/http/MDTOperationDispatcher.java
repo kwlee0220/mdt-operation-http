@@ -220,7 +220,7 @@ public class MDTOperationDispatcher implements InitializingBean {
     private Either<OperationSession, ResponseEntity<RESTfulErrorEntity>> start(OperationRequest request) {
 		String opId = request.getOperation();
 		
-    	File opHome = new File(m_homeDir, opId);
+    	File opHome = new File(m_config.getOperationsDir(), opId);
     	if ( !opHome.isDirectory() ) {
     		s_logger.error("Invalid operation home directory: op={}, dir={}", opId, opHome);
     		
@@ -275,9 +275,6 @@ public class MDTOperationDispatcher implements InitializingBean {
     			}
     		}
     		m_sessions.put(session.m_sessionId, session);
-    		if ( s_logger.isDebugEnabled() ) {
-    			
-    		}
     		
     		// CommandExecution이 종료되면
     		session.m_cmdExec.whenFinished(result -> {
