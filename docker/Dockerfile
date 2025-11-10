@@ -17,10 +17,11 @@ RUN pip3 install --no-cache-dir \
     matplotlib \
     PySide6
 
-RUN mkdir -p /mdt/mdt-operation-server
+RUN mkdir -p /mdt/mdt-operation-http/config
+RUN mkdir -p /mdt/mdt-operation-http/operations
 COPY ./mdt-operation-http.jar /
 
 ENV MDT_HOME=/mdt
 
-WORKDIR /mdt/mdt-operation-server
+WORKDIR /mdt/mdt-operation-http
 ENTRYPOINT ["java", "-jar", "/mdt-operation-http.jar"]
