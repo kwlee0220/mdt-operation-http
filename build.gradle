@@ -8,8 +8,8 @@ group = 'etri'
 version = System.getenv("MDT_BUILD_VERSION") ?: "unknown"
 
 java {
-	sourceCompatibility = JavaVersion.VERSION_17
-	targetCompatibility = JavaVersion.VERSION_17
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
 }
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
@@ -36,6 +36,8 @@ dependencies {
 	
 	// Checker framework
 	implementation("org.checkerframework:checker:${checker_version}")
+	
+	implementation "commons-io:commons-io:${commons_io_version}"
 	
 	// AAS model
 	implementation "org.eclipse.digitaltwin.aas4j:aas4j-dataformat-json:${aas4j_version}"
