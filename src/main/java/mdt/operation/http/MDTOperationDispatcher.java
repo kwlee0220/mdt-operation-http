@@ -57,7 +57,6 @@ import mdt.client.operation.OperationResponse;
 import mdt.model.MDTModelSerDe;
 import mdt.model.ResourceNotFoundException;
 import mdt.model.instance.MDTInstanceManager;
-import mdt.model.sm.AASFile;
 import mdt.model.sm.ref.MDTElementReference;
 import mdt.model.sm.value.ElementValue;
 import mdt.model.sm.value.FileValue;
@@ -399,16 +398,15 @@ public class MDTOperationDispatcher implements InitializingBean {
 		try {
 			ElementValue value = variable.readValue();
 			
-			if ( value instanceof FileValue ) {
+			if ( value instanceof FileValue fv ) {
 				if ( variable instanceof ReferenceVariable refPort ) {
 					MDTElementReference dref = (MDTElementReference) refPort.getReference();
-					AASFile mdtFile = dref.getSubmodelService().getFileByPath(dref.getIdShortPathString());
 
 					String fileName = String.format("%s.%s", variable.getName(),
-													FilenameUtils.getExtension(mdtFile.getPath()));
+													FilenameUtils.getExtension(fv.getValue()));
 					file = new File(workingDir, fileName);
-					IOUtils.toFile(mdtFile.getContent(), file);
-
+					dref.readAttachment(file);
+					
 					return new FileVariable(variable.getName(), file);
 				}
 				else {
