@@ -14,7 +14,7 @@ import java.util.concurrent.TimeoutException;
 
 import javax.annotation.concurrent.GuardedBy;
 
-import org.apache.commons.io.FilenameUtils;
+import org.eclipse.digitaltwin.aas4j.v3.model.SubmodelElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
@@ -44,11 +44,10 @@ import utils.async.command.CommandExecution;
 import utils.async.command.CommandVariable;
 import utils.async.command.CommandVariable.FileVariable;
 import utils.func.Either;
-import utils.func.FOption;
+import utils.func.Optionals;
 import utils.http.RESTfulErrorEntity;
 import utils.io.FileUtils;
 import utils.io.IOUtils;
-import utils.stream.FStream;
 import utils.stream.KeyValueFStream;
 
 import mdt.client.HttpMDTManager;
@@ -57,11 +56,8 @@ import mdt.client.operation.OperationResponse;
 import mdt.model.MDTModelSerDe;
 import mdt.model.ResourceNotFoundException;
 import mdt.model.instance.MDTInstanceManager;
-import mdt.model.sm.ref.MDTElementReference;
 import mdt.model.sm.value.ElementValue;
-import mdt.model.sm.value.FileValue;
-import mdt.model.sm.variable.AbstractVariable.ReferenceVariable;
-import mdt.model.sm.variable.Variable;
+import mdt.model.sm.value.ElementValues;
 import mdt.operation.http.program.ProgramOperationConfiguration;
 import mdt.task.TaskException;
 
@@ -98,7 +94,7 @@ public class MDTOperationDispatcher implements InitializingBean {
 		
 		// 설정 파일에 'homeDir'이 지정되지 않은 경우에는 'operations' 파일이 위치한
 		// 디렉토리를 사용한다.
-		m_homeDir = FOption.getOrElse(m_config.getHomeDir(), FileUtils::getCurrentWorkingDirectory);
+		m_homeDir = Optionals.getOrElse(m_config.getHomeDir(), FileUtils::getCurrentWorkingDirectory);
 	}
 
     @PostMapping("/operations")
@@ -312,7 +308,7 @@ public class MDTOperationDispatcher implements InitializingBean {
     	CommandExecution exec = session.m_cmdExec;
     	OperationResponse resp = switch ( exec.getState() ) {
     		case RUNNING -> OperationResponse.running(sessId, "Operation is running");
-    		case COMPLETED -> OperationResponse.completed(sessId, session.m_request.getOutputVariables());
+    		case COMPLETED -> OperationResponse.completed(sessId, session.m_request.getOutputArguments());
     		case FAILED -> OperationResponse.failed(sessId, exec.getResult().getCause());
     		case CANCELLED -> OperationResponse.cancelled(sessId, "Operation is cancelled");
     		case CANCELLING -> OperationResponse.cancelled(sessId, "Operation is cancelling");
@@ -321,50 +317,17 @@ public class MDTOperationDispatcher implements InitializingBean {
     		default -> throw new InternalException("Unexpected execution status: " + exec.getState());
     	};
     	
-    	return ResponseEntity.status(HttpStatus.OK).body(MDTModelSerDe.toJsonString(resp));
-//    	switch ( exec.getState() ) {
-//    		case RUNNING:
-//    			return ResponseEntity.status(HttpStatus.OK)
-//									.body(OperationResponse.running(sessId, "Operation is running"));
-//    		case COMPLETED:
-//        		return ResponseEntity.status(HttpStatus.OK)
-//    								.body(OperationResponse.completed(sessId, session.m_request.getOutputVariables()));
-//    		case FAILED:
-//    			return ResponseEntity.status(HttpStatus.OK)
-//									.body(OperationResponse.failed(sessId, exec.getResult().getCause()));
-//    		case CANCELLED:
-//    			return ResponseEntity.status(HttpStatus.OK)
-//									.body(OperationResponse.cancelled(sessId, "Operation is cancelled"));
-//    		case CANCELLING:
-//    			return ResponseEntity.status(HttpStatus.OK)
-//									.body(OperationResponse.cancelled(sessId, "Operation is cancelling"));
-//    		case STARTING:
-//    			return ResponseEntity.status(HttpStatus.OK)
-//									.body(OperationResponse.cancelled(sessId, "Operation is starting"));
-//    		case NOT_STARTED:
-//    			return ResponseEntity.status(HttpStatus.OK)
-//									.body(OperationResponse.cancelled(sessId, "Operation is not found"));
-//    		default:
-//    			String msg = "Unexpected execution status: " + exec.getState();
-//    			throw new InternalException(msg);
-//    	}
+    	return ResponseEntity.status(HttpStatus.OK).body(resp.toJsonString());
     }
     
     private void updateOutputArguments(OperationSession session) throws IOException {
-    	FStream.from(session.m_request.getOutputVariables())
-    			.tagKey(Variable::getName)
-				.innerJoin(KeyValueFStream.from(session.m_cmdExec.getVariableMap()))
-				.forEachOrThrow(match -> {
-					Variable var = match.value()._1;
-					CommandVariable cmdVar = match.value()._2;
-					
-					if ( var instanceof ReferenceVariable rvar ) {
-						rvar.activate(m_manager);
-					}
-					
-					String cmdVarValue = cmdVar.getValue();
-					var.updateValue(cmdVarValue);
-				});
+    	KeyValueFStream.from(session.m_request.getOutputArguments())
+						.match(session.m_cmdExec.getVariableMap())
+						.forEachOrThrow(match -> {
+							SubmodelElement arg = match.value()._1;
+							CommandVariable cmdVar = match.value()._2;
+							ElementValues.updateWithValueJsonString(arg, cmdVar.getValue());
+						});
     }
 
 	private CommandExecution buildCommandExecution(OperationSession session) throws TaskException {
@@ -376,15 +339,12 @@ public class MDTOperationDispatcher implements InitializingBean {
 															.setWorkingDirectory(workingDir)
 															.setTimeout(config.getTimeout());
 		
-		FStream.from(session.m_request.getInputVariables())
-				.concatWith(FStream.from(session.m_request.getOutputVariables()))
-		        .peek(var -> {
-					if ( var instanceof ReferenceVariable refVar ) {
-						refVar.activate(m_manager);
-					}
-		        })
-				.mapOrThrow(port -> newCommandVariable(workingDir, port))
-				.forEachOrThrow(builder::addVariableIfAbscent);
+		KeyValueFStream.from(session.m_request.getInputArguments())
+						.mapOrThrow(kv -> newCommandVariable(workingDir, kv.key(), kv.value()))
+						.forEachOrThrow(builder::addVariableIfAbscent);
+		KeyValueFStream.from(session.m_request.getOutputArguments())
+						.mapOrThrow(kv -> newCommandVariable(workingDir, kv.key(), kv.value()))
+						.forEachOrThrow(builder::addVariableIfAbscent);
 
 		// stdout/stderr redirection
 		builder.redirectErrorStream();
@@ -393,35 +353,34 @@ public class MDTOperationDispatcher implements InitializingBean {
 		return builder.build();
 	}
 	
-	private FileVariable newCommandVariable(File workingDir, Variable variable) throws TaskException {
+	private FileVariable newCommandVariable(File workingDir, String varId, SubmodelElement sme) throws TaskException {
 		File file = null;
 		try {
-			ElementValue value = variable.readValue();
+			ElementValue value = ElementValues.getValue(sme);
 			
-			if ( value instanceof FileValue fv ) {
-				if ( variable instanceof ReferenceVariable refPort ) {
-					MDTElementReference dref = (MDTElementReference) refPort.getReference();
-
-					String fileName = String.format("%s.%s", variable.getName(),
-													FilenameUtils.getExtension(fv.getValue()));
-					file = new File(workingDir, fileName);
-					dref.readAttachment(file);
-					
-					return new FileVariable(variable.getName(), file);
-				}
-				else {
-					throw new TaskException("TaskVariable should be a ReferenceVariable: var=" + variable);
-				}
-			}
-			else {
-				file = new File(workingDir, variable.getName());
+//			if ( value instanceof FileValue fv ) {
+//				if ( variable instanceof ReferenceVariable refPort ) {
+//					MDTElementReference dref = (MDTElementReference) refPort.getReference();
+//
+//					String fileName = String.format("%s.%s", varId, FilenameUtils.getExtension(fv.getValue()));
+//					file = new File(workingDir, fileName);
+//					dref.readAttachment(file);
+//					
+//					return new FileVariable(varId, file);
+//				}
+//				else {
+//					throw new TaskException("TaskVariable should be a ReferenceVariable: var=" + variable);
+//				}
+//			}
+//			else {
+				file = new File(workingDir, varId);
 				IOUtils.toFile(value.toValueJsonString(), StandardCharsets.UTF_8, file);
 				
-				return new FileVariable(variable.getName(), file);
-			}
+				return new FileVariable(varId, file);
+//			}
 		}
 		catch ( IOException e ) {
-			throw new InternalException("Failed to write value to file: name=" + variable.getName()
+			throw new InternalException("Failed to write value to file: name=" + varId
 										+ ", path=" + file.getAbsolutePath(), e);
 		}
 	}

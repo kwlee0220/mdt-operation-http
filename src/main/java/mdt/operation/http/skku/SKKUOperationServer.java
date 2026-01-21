@@ -238,7 +238,7 @@ public class SKKUOperationServer implements InitializingBean {
 
 			Set<Map.Entry<String, JsonNode>> elements = jnode.properties();
 			if ( elements.size() == 1 ) {
-				Entry<String,JsonNode> first = Funcs.getFirstOrNull(elements);
+				Entry<String,JsonNode> first = Funcs.getFirst(elements).orElse(null);
 				if ( first.getKey().equals("submodelId") ) {
 					String submodelId = first.getValue().asText();
 					MDTInstance inst = m_mdtClient.getInstanceBySubmodelId(submodelId);

@@ -8,7 +8,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
 
-import utils.func.FOption;
+import utils.func.Optionals;
 import utils.io.FileUtils;
 
 
@@ -25,6 +25,6 @@ public class OperationServerConfiguration {
 	private String m_instanceManagerEndpoint;
 	
 	public File getOperationsDir() {
-		return FOption.getOrElse(m_operationsDir, () -> new File(m_homeDir, "operations"));
+		return Optionals.getOrElse(m_operationsDir, () -> new File(m_homeDir, "operations"));
 	}
 }
