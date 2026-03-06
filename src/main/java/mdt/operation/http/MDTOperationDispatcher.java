@@ -336,8 +336,8 @@ public class MDTOperationDispatcher implements InitializingBean {
 		
 		CommandExecution.Builder builder = CommandExecution.builder()
 															.addCommand(config.getCommandLine())
-															.setWorkingDirectory(workingDir)
-															.setTimeout(config.getTimeout());
+															.workingDirectory(workingDir)
+															.timeout(config.getTimeout());
 		
 		KeyValueFStream.from(session.m_request.getInputArguments())
 						.mapOrThrow(kv -> newCommandVariable(workingDir, kv.key(), kv.value()))
