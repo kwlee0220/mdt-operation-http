@@ -292,7 +292,7 @@ public class MDTSimulatorController implements InitializingBean {
 	private Map<String,String> loadInputs(SubmodelElement simulationInfo) throws IOException {
 		Map<String,String> inputValues = Maps.newLinkedHashMap();
 		
-		SubmodelElementList inputs = cast(traverse(simulationInfo, "Inputs"), SubmodelElementList.class);
+		SubmodelElementList inputs = traverse(simulationInfo, "Inputs", SubmodelElementList.class);
 		for ( SubmodelElement inputSme: inputs.getValue() ) {
 			String inputId = SubmodelUtils.getPropertyValueByPath(inputSme, "InputID", String.class) ;
 			SubmodelElement valueSme = SubmodelUtils.traverse(inputSme, "InputValue");
@@ -305,7 +305,7 @@ public class MDTSimulatorController implements InitializingBean {
 	private List<String> loadOutputVariableNames(SubmodelElement simulationInfo) {
 		List<String> outputVariableNames = Lists.newArrayList();
 		
-		SubmodelElementList outputs = cast(traverse(simulationInfo, "Outputs"), SubmodelElementList.class);
+		SubmodelElementList outputs = traverse(simulationInfo, "Outputs", SubmodelElementList.class);
 		for ( SubmodelElement outputSme: outputs.getValue() ) {
 			String outputId = SubmodelUtils.getPropertyValueByPath(outputSme, "OutputID", String.class) ;
 			outputVariableNames.add(outputId);
