@@ -2,6 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '3.5.4'
 	id 'io.spring.dependency-management' version '1.1.7'
+	id 'eclipse'
 }
 
 group = 'etri'
@@ -31,14 +32,14 @@ dependencies {
 	implementation project(":utils")
 	implementation project(":mdt-client")
 
-	// Guava (from the project :utils)
-	implementation "com.google.guava:guava:${guava_version}"
-	
-	// Checker framework
-	implementation("org.checkerframework:checker:${checker_version}")
-	
 	implementation "commons-io:commons-io:${commons_io_version}"
-	
+
+	// 컴파일 시점 어노테이션 (런타임 의존 없음)
+	// - JCIP: @GuardedBy 등 (Guava 32+ 이후 transitive 제공이 빠졌으므로 명시)
+	// - JetBrains: @NotNull, @Nullable
+	compileOnly "com.google.code.findbugs:jsr305:3.0.2"
+	compileOnly "org.jetbrains:annotations:24.1.0"
+
 	// AAS model
 	implementation "org.eclipse.digitaltwin.aas4j:aas4j-dataformat-json:${aas4j_version}"
 
@@ -47,12 +48,47 @@ dependencies {
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	annotationProcessor 'org.projectlombok:lombok'
-	testImplementation 'org.springframework.boot:spring-boot-starter-test'
-	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
 	implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${springdoc_version}"
+
+	// JUnit 4 classic runner (build.gradle 의 tasks.named('test') { useJUnit() } 와 짝)
+	testImplementation "junit:junit:${junit_version}"
+	testImplementation "org.mockito:mockito-core:${mockito_version}"
 }
 
 bootJar {
 	mainClass = 'mdt.operation.http.MDTHttpOperationServerApplication'
+}
+
+// IDE 자동 빌드가 src/main/resources 산출물을 build/classes/java/main 에 한 번 더
+// 복사해 두기 때문에(아래 eclipse 블록의 출력 디렉토리 설정 참고) 동일 리소스가
+// 두 위치에서 들어와 jar/bootJar 패키징 시 충돌하는 것을 무시한다.
+tasks.withType(Jar).configureEach {
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.named('test') {
+	useJUnit()
+	jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED'
+}
+
+eclipse {
+	classpath {
+		defaultOutputDir = file('build/classes/java/main')
+		file {
+			whenMerged { cp ->
+				cp.entries.each { entry ->
+					if (entry.kind == 'src' && entry.path == 'src/main/java') {
+						entry.output = 'build/classes/java/main'
+					}
+					if (entry.kind == 'src' && entry.path == 'src/main/resources') {
+						entry.output = 'build/classes/java/main'
+					}
+					if (entry.kind == 'src' && entry.path == 'src/test/java') {
+						entry.output = 'build/classes/java/test'
+					}
+				}
+			}
+		}
+	}
 }

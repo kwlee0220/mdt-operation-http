@@ -39,7 +39,7 @@ import com.google.common.collect.Maps;
 
 import utils.InternalException;
 import utils.Throwables;
-import utils.async.Guard;
+import utils.thread.Guard;
 import utils.async.command.CommandExecution;
 import utils.async.command.CommandVariable;
 import utils.async.command.CommandVariable.FileVariable;
@@ -341,10 +341,10 @@ public class MDTOperationDispatcher implements InitializingBean {
 		
 		KeyValueFStream.from(session.m_request.getInputArguments())
 						.mapOrThrow(kv -> newCommandVariable(workingDir, kv.key(), kv.value()))
-						.forEachOrThrow(builder::addVariableIfAbscent);
+						.forEachOrThrow(builder::addVariableIfAbsent);
 		KeyValueFStream.from(session.m_request.getOutputArguments())
 						.mapOrThrow(kv -> newCommandVariable(workingDir, kv.key(), kv.value()))
-						.forEachOrThrow(builder::addVariableIfAbscent);
+						.forEachOrThrow(builder::addVariableIfAbsent);
 
 		// stdout/stderr redirection
 		builder.redirectErrorStream();

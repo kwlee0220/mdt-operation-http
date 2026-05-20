@@ -174,8 +174,8 @@ public class SKKUOperationServer implements InitializingBean {
         			updateOutputProperties(simulationService, outputs);
     			});
     			
-    			StartableExecution<SimulationSession> delayedSessionClose
-		    			= AsyncExecutions.delayed(() -> m_sessions.remove(sessionId),
+    			StartableExecution<Void> delayedSessionClose
+		    			= AsyncExecutions.delay(() -> m_sessions.remove(sessionId),
 			    									session.getSessionRetainTimeout());
     			delayedSessionClose.start();
     		});
@@ -238,11 +238,12 @@ public class SKKUOperationServer implements InitializingBean {
 
 			Set<Map.Entry<String, JsonNode>> elements = jnode.properties();
 			if ( elements.size() == 1 ) {
-				Entry<String,JsonNode> first = Funcs.getFirst(elements).orElse(null);
+				Entry<String,JsonNode> first = Funcs.getFirst(elements);
 				if ( first.getKey().equals("submodelId") ) {
 					String submodelId = first.getValue().asText();
 					MDTInstance inst = m_mdtClient.getInstanceBySubmodelId(submodelId);
-					return inst.getSubmodelServiceById(submodelId);
+					return inst.getSubmodelServiceById(submodelId)
+								.getOrThrow(() -> ResourceNotFoundException.ofId("Submodel", submodelId));
 				}
 				else if ( first.getKey().equals("submodelEndpoint") ) {
 					String submodelEndpoint = first.getValue().asText();
