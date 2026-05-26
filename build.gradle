@@ -67,23 +67,23 @@ tasks.withType(Jar).configureEach {
 	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-eclipse {
-	classpath {
-		defaultOutputDir = file('build/classes/java/main')
-		file {
-			whenMerged { cp ->
-				cp.entries.each { entry ->
-					if (entry.kind == 'src' && entry.path == 'src/main/java') {
-						entry.output = 'build/classes/java/main'
-					}
-					if (entry.kind == 'src' && entry.path == 'src/main/resources') {
-						entry.output = 'build/classes/java/main'
-					}
-					if (entry.kind == 'src' && entry.path == 'src/test/java') {
-						entry.output = 'build/classes/java/test'
-					}
-				}
-			}
-		}
-	}
-}
+// eclipse {
+// 	classpath {
+// 		defaultOutputDir = file('build/classes/java/main')
+// 		file {
+// 			whenMerged { cp ->
+// 				cp.entries.each { entry ->
+// 					if (entry.kind == 'src' && entry.path == 'src/main/java') {
+// 						entry.output = 'build/classes/java/main'
+// 					}
+// 					if (entry.kind == 'src' && entry.path == 'src/main/resources') {
+// 						entry.output = 'build/classes/java/main'
+// 					}
+// 					if (entry.kind == 'src' && entry.path == 'src/test/java') {
+// 						entry.output = 'build/classes/java/test'
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
+// }
