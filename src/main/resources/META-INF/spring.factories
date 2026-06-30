@@ -1,1 +1,1 @@
-org.springframework.boot.env.EnvironmentPostProcessor=mdt.operation.http.MDTOperationServerEnvironment
+org.springframework.boot.env.EnvironmentPostProcessor=mdt.operation.servers.RpcServerDispatcherEnvironment

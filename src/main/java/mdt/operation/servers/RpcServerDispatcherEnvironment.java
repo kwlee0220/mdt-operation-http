@@ -1,4 +1,4 @@
-package mdt.operation.http;
+package mdt.operation.servers;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,10 +21,17 @@ import utils.io.EnvironmentFileLoader;
 import utils.stream.KeyValueFStream;
 
 /**
+ * 애플리케이션 기동 초기에 환경 파일({@code config/env.file})을 읽어 Spring 환경 프로퍼티로 주입하는
+ * {@link EnvironmentPostProcessor}.
+ * <p>
+ * 환경 파일 경로는 시스템 프로퍼티 {@code env.file}, 환경 변수 {@code ENV_FILE}, 기본값
+ * {@code config/env.file} 순으로 결정한다. 로드된 변수들은 최우선 순위
+ * ({@link Ordered#HIGHEST_PRECEDENCE})의 프로퍼티 소스로 등록되며, {@link #getVariables()}로도 조회할 수
+ * 있다. 파일이 없으면 조용히 건너뛴다.
  *
  * @author Kang-Woo Lee (ETRI)
  */
-public class MDTOperationServerEnvironment implements EnvironmentPostProcessor, Ordered {
+public class RpcServerDispatcherEnvironment implements EnvironmentPostProcessor, Ordered {
     private static final DeferredLog s_deferredLog = new DeferredLog();
 
 	private static final String ENV_FILE_ENV_VAR = "ENV_FILE";
@@ -40,7 +47,7 @@ public class MDTOperationServerEnvironment implements EnvironmentPostProcessor, 
 	@Override
 	public void postProcessEnvironment(ConfigurableEnvironment env, SpringApplication application) {
         application.addListeners((ApplicationListener<ApplicationPreparedEvent>) event -> {
-        	Log actualLogger = LogFactory.getLog(MDTOperationServerEnvironment.class);
+        	Log actualLogger = LogFactory.getLog(RpcServerDispatcherEnvironment.class);
 			s_deferredLog.replayTo(actualLogger);
 		});
         
@@ -67,7 +74,9 @@ public class MDTOperationServerEnvironment implements EnvironmentPostProcessor, 
 			MapPropertySource source = new MapPropertySource("mdtEnv", s_environmentVariables);
 			env.getPropertySources().addFirst(source);
 		}
-		catch ( IOException e ) { }
+		catch ( IOException e ) {
+			s_deferredLog.warn("failed to load environment file: " + envFile.getAbsolutePath(), e);
+		}
 	}
 	
 	@Override

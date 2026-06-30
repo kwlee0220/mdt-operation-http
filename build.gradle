@@ -57,7 +57,7 @@ dependencies {
 }
 
 bootJar {
-	mainClass = 'mdt.operation.http.MDTHttpOperationServerApplication'
+	mainClass = 'mdt.operation.servers.RpcServerDispatcherApplication'
 }
 
 // IDE 자동 빌드가 src/main/resources 산출물을 build/classes/java/main 에 한 번 더
@@ -67,23 +67,29 @@ tasks.withType(Jar).configureEach {
 	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-// eclipse {
-// 	classpath {
-// 		defaultOutputDir = file('build/classes/java/main')
-// 		file {
-// 			whenMerged { cp ->
-// 				cp.entries.each { entry ->
-// 					if (entry.kind == 'src' && entry.path == 'src/main/java') {
-// 						entry.output = 'build/classes/java/main'
-// 					}
-// 					if (entry.kind == 'src' && entry.path == 'src/main/resources') {
-// 						entry.output = 'build/classes/java/main'
-// 					}
-// 					if (entry.kind == 'src' && entry.path == 'src/test/java') {
-// 						entry.output = 'build/classes/java/test'
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-// }
+eclipse {
+	classpath {
+		file {
+			whenMerged { cp ->
+				// 의존 프로젝트(:utils, :mdt-client)는 project 참조로만 잡혀야 하며, build/libs의 jar가
+				// classpath에 끼어드는 것을 방지한다. /utils 등 src 참조 존재 여부와 무관하게 무조건 제거하여
+				// 일부 생성 경로에서 jar만 남고 project 참조가 누락되는 경우에도 방어한다. (mdt-client와 동일 정책)
+				def linkedProjectBuildLibDirs = [project(':utils'), project(':mdt-client')]
+						.collect { it.projectDir.toPath().resolve('build/libs').toUri().getPath().replaceAll('/+$', '') }
+				cp.entries.removeAll { entry ->
+					entry.kind == 'lib'
+						&& entry.path != null
+						&& linkedProjectBuildLibDirs.any { dir -> entry.path.startsWith(dir + '/') }
+				}
+				cp.entries.each { entry ->
+					if (entry.kind == 'src' && entry.path == 'src/main/resources') {
+						entry.excludes = []
+					}
+					if (entry.kind == 'src' && entry.path == 'src/test/resources') {
+						entry.excludes = []
+					}
+				}
+			}
+		}
+	}
+}
