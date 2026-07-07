@@ -3,6 +3,7 @@ package mdt.operation.servers;
 import java.io.File;
 import java.io.IOException;
 
+import org.eclipse.digitaltwin.aas4j.v3.model.SubmodelElement;
 import org.jetbrains.annotations.NotNull;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -68,8 +69,14 @@ public class MDTCommandVariableSerDe implements CommandVariableSerDe {
 			// ElementValue ('mdt:value')인지, 아니면 그냥 일반 값인진 판단한다.
 			JsonNode typeNode = jnode.get("@type");
 			if ( typeNode == null ) {
-				// 일반 값인 경우는 '@type' 속성이 없음
-				return deserializeValueObject(id, jnode, file);
+				typeNode = jnode.get("modelType");
+				if ( typeNode == null ) {
+					// 일반 값인 경우는 '@type' 속성이 없음
+					return deserializeValueObject(id, jnode, file);
+				}
+				else {	// AAS SubmodelElement인 경우는 'modelType' 속성이 있음
+					return deserializeSubmodelElement(id, jnode, file);
+				}
 			}
 			else if ( typeNode.asText().startsWith("mdt:ref:") ) {
 				// ElementReference인 경우는 '@type' 속성이 'mdt:ref:'로 시작
@@ -132,6 +139,18 @@ public class MDTCommandVariableSerDe implements CommandVariableSerDe {
 		ElementValue smev = ElementValues.parseJsonNode(jnode);
 		if ( smev instanceof FileValue ) {
 			throw new IOException("FileValue is not allowed for command variable: name=" + id
+										+ ", path=" + file.getAbsolutePath());
+		}
+		
+		String str = MDTModelSerDe.getJsonMapper().writeValueAsString(smev.toValueObject());
+		return new MDTCommandVariable(id, str, file, smev);
+	}
+	
+	private MDTCommandVariable deserializeSubmodelElement(String id, JsonNode jnode, File file) throws IOException {
+		SubmodelElement sme = MDTModelSerDe.readValue(jnode, SubmodelElement.class);
+		ElementValue smev = ElementValues.getValue(sme);
+		if ( smev instanceof FileValue ) {
+			throw new IOException("File is not allowed for command variable: name=" + id
 										+ ", path=" + file.getAbsolutePath());
 		}
 		
