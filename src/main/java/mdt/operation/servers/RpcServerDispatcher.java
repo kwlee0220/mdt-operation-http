@@ -39,6 +39,7 @@ import utils.json.JacksonUtils;
 import utils.rpc.restful.RESTfulAsyncRpcServer;
 import utils.rpc.restful.RpcRequestMessage;
 import utils.rpc.restful.RpcResponseMessage;
+import utils.rpc.restful.RpcState;
 import utils.rpc.restful.process.RESTfulCommandExecutionServer;
 import utils.stream.FStream;
 
@@ -54,7 +55,7 @@ import mdt.model.instance.MDTInstanceManager;
  * {@link RESTfulCommandExecutionServer}를 등록하고, 다음 엔드포인트로 연산의 시작·상태조회·취소를 중계한다.
  * <ul>
  *   <li>{@code POST   /api/v1/operations/{id}} — 연산 시작 ({@link #run})</li>
- *   <li>{@code GET    /api/v1/sessions/{id}/state} — 세션 상태 조회 ({@link #status})</li>
+ *   <li>{@code GET    /api/v1/sessions/{id}} — 세션 상태 조회 ({@link #status})</li>
  *   <li>{@code DELETE /api/v1/sessions/{session}} — 세션 취소 ({@link #delete})</li>
  * </ul>
  * 시작된 세션은 세션 엔드포인트 → RPC 서버 매핑으로 캐시되며(최종 접근 후 30초 뒤 만료), 입력/출력 변수의
@@ -63,9 +64,12 @@ import mdt.model.instance.MDTInstanceManager;
  * @author Kang-Woo Lee (ETRI)
  */
 @RestController
-@RequestMapping("/api/v1")
+@RequestMapping(RpcServerDispatcher.API_PREFIX)
 public class RpcServerDispatcher implements InitializingBean {
 	private static final Logger s_logger = LoggerFactory.getLogger(RpcServerDispatcher.class);
+
+	/** 이 컨트롤러가 노출하는 모든 엔드포인트의 접두사. 세션 엔드포인트 문자열도 이 접두사를 포함한다. */
+	static final String API_PREFIX = "/api/v1";
 	
 	@Autowired private RpcServersConfiguration m_config;
 	private MDTInstanceManager m_manager;
@@ -83,7 +87,6 @@ public class RpcServerDispatcher implements InitializingBean {
 		}
 	}
 
-	
 	private static record RpcServerInfo(String opId, RESTfulAsyncRpcServer rpcServer) { }
 
 	@Override
@@ -168,7 +171,7 @@ public class RpcServerDispatcher implements InitializingBean {
     }
     
     /**
-     * 세션의 현재 연산 상태를 조회한다. ({@code GET /api/v1/sessions/{id}/state})
+     * 세션의 현재 연산 상태를 조회한다. ({@code GET /api/v1/sessions/{id}})
      * <p>
      * 세션을 찾지 못하거나 이미 종료되어 회수된 경우 {@code 404}를 반환하고, 그 경우 세션 맵에서도 제거한다.
      *
@@ -176,12 +179,12 @@ public class RpcServerDispatcher implements InitializingBean {
      * @return	연산 상태를 담은 응답({@code 200}) 또는 세션 미존재 시 {@code 404}.
      * @throws IOException	상태 조회 중 입출력 오류가 발생한 경우.
      */
-    @GetMapping("/sessions/{id}/state")
+    @GetMapping("/sessions/{id}")
     public ResponseEntity<?> status(@PathVariable("id") String sessionId) throws IOException {
     	Preconditions.checkNotNullArgument(sessionId, "session id is null");
 
     	// 세션 식별자를 이용하여 세션 맵에서 해당 세션을 수행 중인 RPC 서버를 찾는다.
-    	String sessionEndpoint = String.format("/sessions/%s", sessionId);
+    	String sessionEndpoint = toSessionEndpoint(sessionId);
     	RpcServerInfo rpcInfo = findRpcServer(sessionEndpoint);
     	if ( rpcInfo == null ) {
     		var cause = new ResourceNotFoundException("RpcSession", "session=" + sessionEndpoint);
@@ -204,18 +207,21 @@ public class RpcServerDispatcher implements InitializingBean {
     /**
      * 세션의 연산을 취소한다. ({@code DELETE /api/v1/sessions/{session}})
      * <p>
-     * 취소에 성공하거나 이미 종료된 경우 {@code 204 No Content}를, 취소 처리 중 오류가 보고되면
-     * {@code 500}과 오류 정보를 반환한다.
+     * 취소가 확정되면 {@code 200 OK}와 함께 {@code CANCELLED} 상태를 담은 {@link RpcResponseMessage}를
+     * 반환한다. 대상 세션이 이미 종료 상태({@code COMPLETED}/{@code FAILED})이거나 연산이 취소 요청을
+     * 거부하여 계속 수행 중({@code RUNNING})인 경우처럼 현재 상태에서 취소가 허용되지 않으면
+     * {@code 409 Conflict}를 반환한다. 세션을 찾지 못하거나 보존 기간이 지나 회수된 경우에는
+     * {@code 404}를 반환하고, 그 경우 세션 맵에서도 제거한다.
      *
      * @param sessionId	세션 식별자.
-     * @return	취소 결과 응답({@code 204} 또는 오류 시 {@code 500}).
+     * @return	취소 확정 시 {@code 200}, 취소가 허용되지 않으면 {@code 409}, 세션 미존재 시 {@code 404}.
      */
     @DeleteMapping("/sessions/{session}")
     public ResponseEntity<?> delete(@PathVariable("session") String sessionId) {
     	Preconditions.checkNotNullArgument(sessionId, "session id is null");
 
     	// 세션 식별자를 이용하여 세션 맵에서 해당 세션을 수행 중인 RPC 서버를 찾는다.
-    	String sessionEndpoint = String.format("/sessions/%s", sessionId);
+    	String sessionEndpoint = toSessionEndpoint(sessionId);
     	RpcServerInfo rpcInfo = findRpcServer(sessionEndpoint);
     	if ( rpcInfo == null ) {
     		throw new ResourceNotFoundException("RpcSession", "session=" + sessionEndpoint);
@@ -226,15 +232,27 @@ public class RpcServerDispatcher implements InitializingBean {
 			// 세션이 이미 종료되었으면, 세션 맵에서 제거한다.
     		m_sessions.invalidate(sessionEndpoint);
 			
-    		return ResponseEntity.noContent().build();
+    		String resourceId = String.format("rpc=%s, session=%s", rpcInfo.opId, sessionEndpoint);
+    		var cause = new ResourceNotFoundException("RpcSession", resourceId);
+    		return ResponseEntity.status(HttpStatus.NOT_FOUND)
+    								.body(RESTfulErrorEntity.of(cause));
 		}
-    	if ( resp.getError() == null ) {
-    		return ResponseEntity.noContent().build();
+    	
+    	if ( resp.getState() != RpcState.CANCELLED ) {
+    		// 현재 상태에서 취소가 허용되지 않는 경우이다.
+    		// 이미 종료된 세션은 rpcServer가 read-once로 회수했으므로 세션 맵에서도 제거하고,
+    		// 취소가 거부되어 계속 수행 중인 세션은 그대로 남겨 이후 조회가 가능하게 한다.
+    		if ( resp.getState() != RpcState.RUNNING ) {
+    			m_sessions.invalidate(sessionEndpoint);
+    		}
+    		
+    		String details = String.format("cannot cancel: rpc=%s, session=%s, status=%s",
+    										rpcInfo.opId, sessionEndpoint, resp.getState());
+    		return ResponseEntity.status(HttpStatus.CONFLICT)
+    								.body(RESTfulErrorEntity.ofMessage(details));
     	}
-    	else {
-    		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-    								.body(resp.getError());
-    	}
+    	
+    	return ResponseEntity.ok().body(resp);
     }
     
     @ExceptionHandler()
@@ -258,6 +276,16 @@ public class RpcServerDispatcher implements InitializingBean {
     	}
     }
     
+    /**
+     * 세션 식별자로부터 RPC 서버가 발급하는 것과 동일한 형식의 세션 엔드포인트를 만든다.
+     *
+     * @param sessionId	세션 식별자.
+     * @return	세션 엔드포인트. (예: {@code /api/v1/sessions/{id}})
+     */
+    private static String toSessionEndpoint(String sessionId) {
+    	return String.format("%s/sessions/%s", API_PREFIX, sessionId);
+    }
+
     /**
      * 세션 엔드포인트를 수행 중인 RPC 서버를 찾는다.
      * <p>
