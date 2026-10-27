@@ -44,7 +44,7 @@ public class MDTCommandVariable extends CommandVariable {
 	 * @throws IOException	상위 {@link CommandVariable} 생성 중 입출력 오류가 발생한 경우.
 	 */
 	public MDTCommandVariable(String name, String value, File file, ElementValue proto) throws IOException {
-		super(name, value, file);
+		super(name, value, file, true);
 
 		m_prototype = proto;
 		m_reference = null;
@@ -59,7 +59,7 @@ public class MDTCommandVariable extends CommandVariable {
 	 * @throws IOException	상위 {@link CommandVariable} 생성 중 입출력 오류가 발생한 경우.
 	 */
 	public MDTCommandVariable(String name, File file, ElementValue proto) throws IOException {
-		super(name, file);
+		super(name, null, file, true);
 
 		m_prototype = proto;
 		m_reference = null;
@@ -76,7 +76,7 @@ public class MDTCommandVariable extends CommandVariable {
 	 */
 	public MDTCommandVariable(String name, String value, File file, MDTElementReference ref)
 		throws IOException {
-		super(name, value, file);
+		super(name, value, file, true);
 
 		m_prototype = null;
 		m_reference = ref;

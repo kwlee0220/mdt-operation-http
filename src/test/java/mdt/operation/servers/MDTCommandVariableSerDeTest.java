@@ -115,7 +115,7 @@ public class MDTCommandVariableSerDeTest {
 	public void testSerializeNonMDTCommandVariableRejected() throws IOException {
 		File f = new File(m_dir, "plain");
 		Files.writeString(f.toPath(), "v");
-		CommandVariable plain = new CommandVariable("plain", "v", f);
+		CommandVariable plain = CommandVariable.input("plain", "v", f);
 
 		assertThrows(IllegalArgumentException.class, () -> m_serde.serialize(plain));
 	}
