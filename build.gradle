@@ -32,8 +32,6 @@ dependencies {
 	implementation project(":utils")
 	implementation project(":mdt-client")
 
-	implementation "commons-io:commons-io:${commons_io_version}"
-
 	// 컴파일 시점 어노테이션 (런타임 의존 없음)
 	// - JCIP: @GuardedBy 등 (Guava 32+ 이후 transitive 제공이 빠졌으므로 명시)
 	// - JetBrains: @NotNull, @Nullable
@@ -53,7 +51,7 @@ dependencies {
 
 	// JUnit 4 classic runner (build.gradle 의 tasks.named('test') { useJUnit() } 와 짝)
 	testImplementation "junit:junit:${junit_version}"
-	testImplementation "org.mockito:mockito-core:${mockito_version}"
+	testImplementation "org.mockito:mockito-core"		// Spring Boot가 버전을 관리한다
 }
 
 bootJar {
