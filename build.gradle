@@ -35,11 +35,11 @@ dependencies {
 	// 컴파일 시점 어노테이션 (런타임 의존 없음)
 	// - JCIP: @GuardedBy 등 (Guava 32+ 이후 transitive 제공이 빠졌으므로 명시)
 	// - JetBrains: @NotNull, @Nullable
-	compileOnly "com.google.code.findbugs:jsr305:3.0.2"
-	compileOnly "org.jetbrains:annotations:24.1.0"
+	compileOnly libs.findbugs.jsr305
+	compileOnly libs.jetbrains.annotations
 
 	// AAS model
-	implementation "org.eclipse.digitaltwin.aas4j:aas4j-dataformat-json:${aas4j_version}"
+	implementation libs.aas4j.dataformat.json
 
     // SpringBoot dependencies
 	implementation 'org.springframework.boot:spring-boot-starter-web'
@@ -47,10 +47,10 @@ dependencies {
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	annotationProcessor 'org.projectlombok:lombok'
 
-	implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${springdoc_version}"
+	implementation libs.springdoc.webmvc.ui
 
 	// JUnit 4 classic runner (build.gradle 의 tasks.named('test') { useJUnit() } 와 짝)
-	testImplementation "junit:junit:${junit_version}"
+	testImplementation libs.junit4
 	testImplementation "org.mockito:mockito-core"		// Spring Boot가 버전을 관리한다
 }
 
