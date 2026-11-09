@@ -1,4 +1,4 @@
-package mdt.operation.servers;
+package mdt.operation.server;
 
 import java.io.File;
 import java.io.IOException;
@@ -15,6 +15,7 @@ import utils.rpc.restful.process.CommandVariableSerDe;
 
 import mdt.model.MDTModelSerDe;
 import mdt.model.instance.MDTInstanceManager;
+import mdt.model.sm.ref.ElementReference;
 import mdt.model.sm.ref.ElementReferences;
 import mdt.model.sm.ref.MDTElementReference;
 import mdt.model.sm.value.ElementValue;
@@ -51,12 +52,39 @@ public class MDTCommandVariableSerDe implements CommandVariableSerDe {
 	 * 입력 JSON의 {@code @type} 속성으로 입력 형태(요소 참조/{@link ElementValue}/일반 값)를 구분하여
 	 * {@link MDTCommandVariable}로 역직렬화한다.
 	 *
+	 * <p>
+	 * 입력 값 자체가 잘못된 경우는 {@link IllegalArgumentException}으로, 값을 읽거나 파일에 기록하는 중의
+	 * 오류는 {@link IOException}으로 구분한다. 2026-11-08 이전에는 입력 오류도 모두 {@code IOException}
+	 * ("Failed to write value to file")으로 보고되었다(검토 D3).
+	 *
 	 * @throws IllegalArgumentException	{@code id}/{@code cvDir}/{@code jnode}가 {@code null}이거나
-	 * 									{@code cvDir}가 디렉토리가 아닌 경우.
-	 * @throws IOException	{@code @type}이 알 수 없는 값이거나 값 변환 중 입출력 오류가 발생한 경우.
+	 * 									{@code cvDir}가 디렉토리가 아닌 경우, {@code @type}이 알 수 없는 값이거나
+	 * 									MDT 요소 참조가 아닌 참조인 경우, 파일 값({@link FileValue},
+	 * 									AAS {@code File})을 값으로 직접 준 경우.
+	 * @throws IOException	참조 값을 읽거나 값을 변환·기록하는 중 오류가 발생한 경우.
 	 */
 	@Override
 	public CommandVariable deserialize(String id, File cvDir, @NotNull JsonNode jnode) throws IOException {
+		return deserialize(id, cvDir, jnode, false);
+	}
+
+	/**
+	 * 출력 변수를 만든다. 입력({@link #deserialize(String, File, JsonNode)})과 같되, 출력 위치로 'File' 요소의 MDT 참조가 지정되면
+	 * 참조 대상의 첨부 파일을 내려받지 않고, 명령이 끝난 뒤 결과 파일을 그 요소에 올리는 변수를 만든다
+	 * ({@link MDTCommandVariable#MDTCommandVariable(String, File, MDTElementReference)}).
+	 * <p>
+	 * 2026-11-08 이전에는 출력도 입력과 같이 처리되어, 파일 출력은 결과를 돌려주지 못했다(검토 D2).
+	 *
+	 * @throws IllegalArgumentException	{@link #deserialize(String, File, JsonNode)}와 같다.
+	 * @throws IOException	{@link #deserialize(String, File, JsonNode)}와 같다.
+	 */
+	@Override
+	public CommandVariable deserializeOutput(String id, File cvDir, @NotNull JsonNode jnode) throws IOException {
+		return deserialize(id, cvDir, jnode, true);
+	}
+
+	private CommandVariable deserialize(String id, File cvDir, JsonNode jnode, boolean output)
+		throws IOException {
 		Preconditions.checkNotNullArgument(id, "id is null");
 		Preconditions.checkNotNullArgument(cvDir, "cvDir is null");
 		Preconditions.checkArgument(cvDir.isDirectory(), "cvDir is not a directory: " + cvDir.getAbsolutePath());
@@ -72,7 +100,7 @@ public class MDTCommandVariableSerDe implements CommandVariableSerDe {
 				typeNode = jnode.get("modelType");
 				if ( typeNode == null ) {
 					// 일반 값인 경우는 '@type' 속성이 없음
-					return deserializeValueObject(id, jnode, file);
+					return deserializePlainValue(id, jnode, file);
 				}
 				else {	// AAS SubmodelElement인 경우는 'modelType' 속성이 있음
 					return deserializeSubmodelElement(id, jnode, file);
@@ -80,19 +108,20 @@ public class MDTCommandVariableSerDe implements CommandVariableSerDe {
 			}
 			else if ( typeNode.asText().startsWith("mdt:ref:") ) {
 				// ElementReference인 경우는 '@type' 속성이 'mdt:ref:'로 시작
-				return deserializeReference(id, jnode, file);
+				return deserializeReference(id, jnode, file, output);
 			}
 			else if ( typeNode.asText().startsWith("mdt:value:") ) {
 				// ElementValue인 경우는 '@type' 속성이 'mdt:value:'로 시작
 				return deserializeElementValue(id, jnode, file);
 			}
 			else {
-				throw new IOException("Invalid argument: name=" + id + ", value=" + typeNode.asText());
+				throw new IllegalArgumentException("unknown @type of command variable: name=" + id
+													+ ", @type=" + typeNode.asText());
 			}
 		}
 		catch ( IOException e ) {
-			throw new IOException("Failed to write value to file: name=" + id
-										+ ", path=" + file.getAbsolutePath(), e);
+			throw new IOException("failed to prepare command variable: name=" + id
+										+ ", path=" + file.getAbsolutePath() + ", cause=" + e.getMessage(), e);
 		}
 	}
 
@@ -111,21 +140,31 @@ public class MDTCommandVariableSerDe implements CommandVariableSerDe {
 		return KeyValue.of(var.getName(), ((MDTCommandVariable)var).toJsonNode());
 	}
 	
-	private MDTCommandVariable deserializeValueObject(String id, JsonNode jnode, File file)
+	private MDTCommandVariable deserializePlainValue(String id, JsonNode jnode, File file)
 		throws IOException {
 		String str = MDTModelSerDe.getJsonMapper().writeValueAsString(jnode);
 		return new MDTCommandVariable(id, str, file, (ElementValue)null);
 	}
 	
-	private MDTCommandVariable deserializeReference(String id, JsonNode jnode, File file) throws IOException {
-		MDTElementReference ref = (MDTElementReference)ElementReferences.parseJsonNode(jnode);
+	private MDTCommandVariable deserializeReference(String id, JsonNode jnode, File file, boolean output)
+		throws IOException {
+		ElementReference parsed = ElementReferences.parseJsonNode(jnode);
+		if ( !(parsed instanceof MDTElementReference ref) ) {
+			// 2026-11-08 이전에는 바로 캐스트하여 ClassCastException이 났다(검토 D3).
+			throw new IllegalArgumentException("not an MDT element reference: name=" + id
+												+ ", reference=" + parsed);
+		}
 		ref.activate(m_manager);
 		
 		// reference에 해당하는 값을 읽어서 ElementValue의 타입을 확인한다.
-		// AAS FileValue 인 경우는 파일에 저장된 content를 읽어와서 명령 변수 파일에 대신 저장한다.
-		// 일반 ElementValue인 경우는 value-object를 JSON 문자열로 변환하여 저장한다.
+		// AAS FileValue 인 경우: 입력이면 첨부 파일을 내려받아 명령 변수 파일에 저장하고, 출력이면 내려받지 않고
+		// 명령이 끝난 뒤 결과 파일을 올릴 변수를 만든다.
+		// 일반 ElementValue인 경우는 value-object를 JSON 문자열로 변환하여 저장한다(출력이면 값 해석용 프로토타입).
 		ElementValue smev = ref.readValue();
-		if ( smev instanceof FileValue ) {
+		if ( smev instanceof FileValue && output ) {
+			return new MDTCommandVariable(id, file, ref);
+		}
+		else if ( smev instanceof FileValue ) {
 			ref.readAttachment(file);
 			return new MDTCommandVariable(id, file, smev);
 		}
@@ -138,8 +177,7 @@ public class MDTCommandVariableSerDe implements CommandVariableSerDe {
 	private MDTCommandVariable deserializeElementValue(String id, JsonNode jnode, File file) throws IOException {
 		ElementValue smev = ElementValues.parseJsonNode(jnode);
 		if ( smev instanceof FileValue ) {
-			throw new IOException("FileValue is not allowed for command variable: name=" + id
-										+ ", path=" + file.getAbsolutePath());
+			throw new IllegalArgumentException("FileValue is not allowed for command variable: name=" + id);
 		}
 		
 		String str = MDTModelSerDe.getJsonMapper().writeValueAsString(smev.toValueObject());
@@ -150,8 +188,7 @@ public class MDTCommandVariableSerDe implements CommandVariableSerDe {
 		SubmodelElement sme = MDTModelSerDe.readValue(jnode, SubmodelElement.class);
 		ElementValue smev = ElementValues.getValue(sme);
 		if ( smev instanceof FileValue ) {
-			throw new IOException("File is not allowed for command variable: name=" + id
-										+ ", path=" + file.getAbsolutePath());
+			throw new IllegalArgumentException("File is not allowed for command variable: name=" + id);
 		}
 		
 		String str = MDTModelSerDe.getJsonMapper().writeValueAsString(smev.toValueObject());

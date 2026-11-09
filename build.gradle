@@ -49,13 +49,13 @@ dependencies {
 
 	implementation libs.springdoc.webmvc.ui
 
-	// JUnit 4 classic runner (build.gradle 의 tasks.named('test') { useJUnit() } 와 짝)
+	// JUnit 4 테스트. test 태스크는 따로 설정하지 않으며, Gradle 기본값(JUnit 4 runner)으로 실행된다.
 	testImplementation libs.junit4
 	testImplementation "org.mockito:mockito-core"		// Spring Boot가 버전을 관리한다
 }
 
 bootJar {
-	mainClass = 'mdt.operation.servers.RpcServerDispatcherApplication'
+	mainClass = 'mdt.operation.server.MDTOperationServerApplication'
 }
 
 // IDE 자동 빌드가 src/main/resources 산출물을 build/classes/java/main 에 한 번 더

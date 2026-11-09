@@ -1,8 +1,7 @@
-package mdt.operation.servers;
+package mdt.operation.server;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -26,28 +25,24 @@ import utils.stream.KeyValueFStream;
  * <p>
  * 환경 파일 경로는 시스템 프로퍼티 {@code env.file}, 환경 변수 {@code ENV_FILE}, 기본값
  * {@code config/env.file} 순으로 결정한다. 로드된 변수들은 최우선 순위
- * ({@link Ordered#HIGHEST_PRECEDENCE})의 프로퍼티 소스로 등록되며, {@link #getVariables()}로도 조회할 수
- * 있다. 파일이 없으면 조용히 건너뛴다.
+ * ({@link Ordered#HIGHEST_PRECEDENCE})의 프로퍼티 소스({@code mdtEnv})로 등록된다. 파일이 없으면 조용히
+ * 건너뛴다. 로그에는 변수 이름만 남기고 값은 남기지 않는다.
+ * <p>
+ * 2026-11-08 이전 이름은 {@code RpcServerDispatcherEnvironment}였다(검토 N4).
  *
  * @author Kang-Woo Lee (ETRI)
  */
-public class RpcServerDispatcherEnvironment implements EnvironmentPostProcessor, Ordered {
+public class EnvFilePostProcessor implements EnvironmentPostProcessor, Ordered {
     private static final DeferredLog s_deferredLog = new DeferredLog();
 
 	private static final String ENV_FILE_ENV_VAR = "ENV_FILE";
 	private static final String ENV_FILE_PROPERTY = "env.file";
 	private static final String ENV_FILE_NAME = "config/env.file";
 	
-	private static Map<String,Object> s_environmentVariables = Map.of();
-	
-	public static Map<String,Object> getVariables() {
-		return Collections.unmodifiableMap(s_environmentVariables);
-	}
-	
 	@Override
 	public void postProcessEnvironment(ConfigurableEnvironment env, SpringApplication application) {
         application.addListeners((ApplicationListener<ApplicationPreparedEvent>) event -> {
-        	Log actualLogger = LogFactory.getLog(RpcServerDispatcherEnvironment.class);
+        	Log actualLogger = LogFactory.getLog(EnvFilePostProcessor.class);
 			s_deferredLog.replayTo(actualLogger);
 		});
         
@@ -66,12 +61,14 @@ public class RpcServerDispatcherEnvironment implements EnvironmentPostProcessor,
 			EnvironmentFileLoader envLoader = EnvironmentFileLoader.from(new File(path));
 			LinkedHashMap<String, String> variables = envLoader.load();
 
-			s_environmentVariables
+			Map<String,Object> envVars
 				= KeyValueFStream.from(variables)
-								.peek(v -> s_deferredLog.info(String.format("  - EnvVar: %s=%s", v.key(), v.value())))
+								// 값에는 접속 정보·비밀 값이 들어갈 수 있으므로 이름만 기록한다.
+								// 2026-11-08 이전에는 값까지 INFO 로그에 남겼다(검토 D5).
+								.peek(v -> s_deferredLog.info("  - EnvVar: " + v.key()))
 								.mapValue(v -> (Object)v)
 								.toMap();
-			MapPropertySource source = new MapPropertySource("mdtEnv", s_environmentVariables);
+			MapPropertySource source = new MapPropertySource("mdtEnv", envVars);
 			env.getPropertySources().addFirst(source);
 		}
 		catch ( IOException e ) {
