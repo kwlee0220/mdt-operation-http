@@ -2,7 +2,6 @@ package mdt.operation.server;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.apache.commons.logging.Log;
@@ -59,7 +58,7 @@ public class EnvFilePostProcessor implements EnvironmentPostProcessor, Ordered {
 		s_deferredLog.info("loading environment variables from file: " + envFile.getAbsolutePath());
 		try {
 			EnvironmentFileLoader envLoader = EnvironmentFileLoader.from(new File(path));
-			LinkedHashMap<String, String> variables = envLoader.load();
+			Map<String,String> variables = envLoader.load();
 
 			Map<String,Object> envVars
 				= KeyValueFStream.from(variables)
